@@ -1,25 +1,25 @@
-# 🌌 Laplace's Demon — N-Body Universe Simulation
+# Laplace's Demon — N-Body Universe Simulation
 
 > *"An intellect which at a certain moment would know all forces that set nature in motion, and all positions of all items of which nature is composed... would embrace in a single formula the movements of the greatest bodies of the universe and those of the tiniest atom; for it, nothing would be uncertain and the future just like the past would be present before its eyes."*  
 > — **Pierre-Simon Laplace**, *Essai philosophique sur les probabilités* (1814)
 
-A deterministic, ultra-high-performance 2D N-body gravitational sandbox simulation capable of rendering thousands of gravitating particles in real-time. Built with **Barnes-Hut $O(N \log N)$ quadtree gravity**, **parallel Numba JIT kernels**, **symplectic Leapfrog KDK integration**, and **zero-allocation memory architecture**.
+A deterministic, ultra-high-performance 2D N-body gravitational sandbox simulation capable of rendering thousands of gravitating particles in real-time. Built with **Barnes-Hut O(N log N) quadtree gravity**, **parallel Numba JIT kernels**, **symplectic Leapfrog KDK integration**, and **zero-allocation memory architecture**.
 
 ---
 
-## ✨ Features
+## Features
 
-- ⚡ **Numba JIT Acceleration**: Multi-threaded C-speed physics hot paths using Numba `@njit(parallel=True)` and SIMD fastmath operations.
-- 🌳 **Barnes-Hut $O(N \log N)$ Quadtree**: Scalable gravitational force calculations for $5,000+$ particles in real-time.
-- 🔄 **Symplectic Integrator**: Leapfrog KDK (Kick-Drift-Kick) scheme guaranteeing long-term energy conservation without energy drift.
-- 🎨 **Vectorized Real-Time Renderer**: Blazing-fast Pygame particle trails, additive blending, glow effects, and interactive HUD.
-- 🚀 **Zero-Allocation Architecture**: Global pre-allocated node pools eliminating garbage collection pauses across tens of thousands of frames.
-- 🛡️ **Precision & Stability Safeguards**: Stack-depth limits (126 levels) and floating-point safeguards against deep-space slingshot stack overflows.
-- 🎥 **Dual Rendering Modes**: Real-time interactive Pygame sandbox + headless offline Matplotlib renderer with video export (`.mp4`).
+- **Numba JIT Acceleration**: Multi-threaded C-speed physics hot paths using Numba `@njit(parallel=True)` and SIMD fastmath operations.
+- **Barnes-Hut O(N log N) Quadtree**: Scalable gravitational force calculations for 5,000+ particles in real-time.
+- **Symplectic Integrator**: Leapfrog KDK (Kick-Drift-Kick) scheme guaranteeing long-term energy conservation without energy drift.
+- **Vectorized Real-Time Renderer**: Blazing-fast Pygame particle trails, additive blending, glow effects, and interactive HUD.
+- **Zero-Allocation Architecture**: Global pre-allocated node pools eliminating garbage collection pauses across tens of thousands of frames.
+- **Precision & Stability Safeguards**: Stack-depth limits (126 levels) and floating-point safeguards against deep-space slingshot stack overflows.
+- **Dual Rendering Modes**: Real-time interactive Pygame sandbox + headless offline Matplotlib renderer with video export (`.mp4`).
 
 ---
 
-## 🌌 Simulation Presets
+## Simulation Presets
 
 | Preset | Command | Description |
 | :--- | :--- | :--- |
@@ -30,22 +30,25 @@ A deterministic, ultra-high-performance 2D N-body gravitational sandbox simulati
 
 ---
 
-## 🎮 Controls (Pygame Mode)
+## Controls (Pygame Mode)
 
-| Action / Key | Function |
+| Input / Key | Action |
 | :--- | :--- |
-| **Mouse Drag (Left Click)** | Pan the camera viewport |
-| **Mouse Scroll** | Zoom in / Zoom out smoothly |
-| `SPACE` | Pause / Resume physics step |
-| `+` / `↑` | Increase simulation speed (double time step multiplier) |
-| `-` / `↓` | Decrease simulation speed (halve time step multiplier) |
-| `R` | Reset camera view to frame all active particles |
-| `T` | Clear all particle trail visual buffers |
-| `ESC` | Exit simulation |
+| **Left Click + Drag** | Pan the camera viewport |
+| **Mouse Scroll Wheel** | Zoom in / Zoom out centered at mouse cursor |
+| **]** | Zoom in towards window center |
+| **[** | Zoom out from window center |
+| **SPACE** | Pause / Resume physics simulation |
+| **+** / **=** / **Up Arrow** | Double simulation speed multiplier (up to 64x) |
+| **-** / **Down Arrow** | Halve simulation speed multiplier (down to 1x) |
+| **R** | Reset camera view to frame all active particles |
+| **T** | Clear particle trail visual buffers |
+| **Window Resize** | Resize viewport dynamically |
+| **ESC** / **Close Window** | Exit simulation |
 
 ---
 
-## 🛠️ Installation
+## Installation
 
 Ensure you have Python 3.9+ installed, then install the required dependencies:
 
@@ -55,7 +58,7 @@ pip install numpy numba pygame matplotlib scipy
 
 ---
 
-## 🚀 Usage Guide
+## Usage Guide
 
 ### Real-Time Interactive Simulation (Pygame)
 
@@ -88,7 +91,7 @@ python main.py --mode mpl --N 1000 --mpl-steps 5000 --save universe.mp4
 
 ---
 
-## ⚙️ Configuration & CLI Options
+## Configuration & CLI Options
 
 ```text
 Options:
@@ -109,7 +112,7 @@ Options:
 
 ---
 
-## 🏛️ Project Architecture
+## Project Architecture
 
 ```
 Universe Simulation/
@@ -127,28 +130,40 @@ Universe Simulation/
 
 ---
 
-## 🔬 Physics & Optimization Highlights
+## Physics & Optimization Highlights
 
-1. **Symplectic Phase-Space Preservation**:
-   Unlike standard Euler or Runge-Kutta integrators which damp or explode orbital systems over time, Laplace's Demon utilizes the **Kick-Drift-Kick (KDK) Leapfrog scheme**:
-   $$\mathbf{v}^{n+1/2} = \mathbf{v}^n + \mathbf{a}^n \frac{\Delta t}{2}$$
-   $$\mathbf{x}^{n+1} = \mathbf{x}^n + \mathbf{v}^{n+1/2} \Delta t$$
-   $$\mathbf{v}^{n+1} = \mathbf{v}^{n+1/2} + \mathbf{a}^{n+1} \frac{\Delta t}{2}$$
-   This preserves the Hamiltonian phase-space volume, keeping total energy $\Delta E / E_0$ virtually zero over millions of steps.
+### 1. Symplectic Phase-Space Preservation
+Unlike standard Euler or Runge-Kutta integrators which damp or explode orbital systems over time, Laplace's Demon utilizes the **Kick-Drift-Kick (KDK) Leapfrog scheme**:
 
-2. **Parallel Barnes-Hut Tree Calculation**:
-   Gravitational acceleration is computed in $O(N \log N)$ time using quadtrees. When a tree node satisfies the opening criteria $r / d < \theta$, the entire subtree is approximated by its center of mass, evaluated across multi-core CPU threads using Numba `prange`.
+```math
+v^{n+1/2} = v^n + a^n \frac{\Delta t}{2}
+```
+```math
+x^{n+1} = x^n + v^{n+1/2} \Delta t
+```
+```math
+v^{n+1} = v^{n+1/2} + a^{n+1} \frac{\Delta t}{2}
+```
 
-3. **Zero-Allocation Memory Pipeline**:
-   Instead of dynamically instantiating Python quadtree objects every frame, node data structures are laid out flat in contiguous array buffers (`_node_float`, `_node_int`). Rebuilding the tree costs $O(N)$ flat array overwrites without heap memory allocations or garbage collection hits.
+This preserves the Hamiltonian phase-space volume, keeping total energy drift `dE/E_0` virtually zero over millions of steps.
 
-4. **Numerical Stability Safeguards**:
-   Close encounters between high-velocity particles can cause numerical divergence or precision loss. Softening factor $\epsilon$ prevents gravitational singularities:
-   $$\mathbf{a}_i = G \sum_{j \neq i} m_j \frac{\mathbf{r}_{ji}}{(r_{ji}^2 + \epsilon^2)^{3/2}}$$
-   Tree depth is hard-clamped at 126 levels to handle edge cases where particles are ejected into deep space.
+### 2. Parallel Barnes-Hut Tree Calculation
+Gravitational acceleration is computed in `O(N log N)` time using quadtrees. When a tree node satisfies the opening criteria `r / d < theta`, the entire subtree is approximated by its center of mass, evaluated across multi-core CPU threads using Numba `prange`.
+
+### 3. Zero-Allocation Memory Pipeline
+Instead of dynamically instantiating Python quadtree objects every frame, node data structures are laid out flat in contiguous array buffers (`_node_float`, `_node_int`). Rebuilding the tree costs `O(N)` flat array overwrites without heap memory allocations or garbage collection hits.
+
+### 4. Numerical Stability & Softening
+Close encounters between high-velocity particles can cause numerical divergence or precision loss. Softening factor `epsilon` prevents gravitational singularities:
+
+```math
+a_i = G \sum_{j \neq i} m_j \frac{r_{ji}}{(r_{ji}^2 + \epsilon^2)^{3/2}}
+```
+
+Tree depth is hard-clamped at 126 levels to handle edge cases where particles are ejected into deep space.
 
 ---
 
-## 📜 License
+## License
 
-Distributed under the MIT License. See `LICENSE` for more information.
+Distributed under the MIT License.
