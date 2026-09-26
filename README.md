@@ -23,10 +23,36 @@ A deterministic, ultra-high-performance 2D N-body gravitational sandbox simulati
 
 | Preset | Command | Description |
 | :--- | :--- | :--- |
-| **Twin Galaxies** | `python main.py --preset twin_galaxies` | Two massive spiral galaxies with central supermassive black holes, accretion disks, and orbiting planetary systems locked in a collision course. |
-| **Solar System** | `python main.py --preset solar_system` | A central star orbited by multiple major planets, moons, packed main asteroid belt, and an outer Oort cloud. |
-| **Chaos** | `python main.py --preset chaos` | 5 chaotic, high-density particle clusters colliding at speed, producing intricate tidal tails and gravitational slingshots. |
-| **Laplace** | `python main.py --preset laplace` | Highly structured concentric deterministic rings demonstrating phase space symmetry and order under gravity. |
+| **Twin Galaxies** | `python3 main.py --preset twin_galaxies` | Two colliding spiral galaxies with central supermassive black holes, disk stars, and comet halos. |
+| **Solar System** | `python3 main.py --preset solar_system` | Sun orbited by 8 Major Planets (Mercury to Neptune), packed Asteroid Belt, and Oort Cloud. |
+| **Alpha Centauri** | `python3 main.py --preset alpha_centauri` | Alpha Centauri A/B binary star pair + Proxima Centauri (M-dwarf Red Star) + Proxima b/c exoplanets + debris belt. |
+| **Milkomeda** | `python3 main.py --preset milkomeda` | Future 4.5B year merger of Andromeda (M31) + Milky Way + Triangulum (M33) dwarf satellite galaxy. |
+| **Cygnus X-1** | `python3 main.py --preset cygnus_x1` | Stellar-mass Black Hole + Blue Supergiant companion star (HDE 226868) + accretion disk & bipolar jets. |
+| **Messier 13** | `python3 main.py --preset messier13` | M13 Hercules Globular Cluster modeled with **100% Stellar Archetypes** (Red Giants, Pulsars, White Dwarfs, Blue Stragglers) with radial mass segregation. |
+| **Messier 31** | `python3 main.py --preset messier31` | M31 Andromeda Galaxy with central SMBH, logarithmic spiral arm structure, and stellar bulge. |
+| **Chaos** | `python3 main.py --preset chaos` | 5 chaotic galaxy clusters on a collision course producing intricate tidal tails and gravitational slingshots. |
+| **Laplace** | `python3 main.py --preset laplace` | Structured concentric deterministic rings demonstrating phase space symmetry and order under gravity. |
+
+---
+
+## Stellar Archetypes & Visual Palette
+
+The simulation uses an astrophysically accurate, visually distinct, non-overlapping color palette across all celestial bodies:
+
+| Archetype | Description & Astrophysical Basis | Visual Color | RGB Code |
+| :--- | :--- | :--- | :--- |
+| **`STAR`** | Sun-like G/K Main Sequence | Warm Cream Gold | `(255, 220, 120)` |
+| **`RED_DWARF`** | M-Type Red Dwarf Star | Deep Crimson Red | `(180, 20, 40)` |
+| **`RED_GIANT`** | Evolved Red Giants & Supergiants | Deep Ruby Coral | `(255, 90, 50)` |
+| **`BLUE_STRAGGLER`** | Hot O/B-type Stars & Blue Stragglers | Luminous Ice Blue | `(100, 190, 255)` |
+| **`WHITE_DWARF`** | Compact Stellar Remnants | Diamond Pearl White | `(245, 250, 255)` |
+| **`NEUTRON_STAR`** | Relativistic Pulsars / Magnetars | Soft Violet-Indigo | `(190, 140, 255)` |
+| **`EMISSION_STAR`** | Wolf-Rayet Stars ($[\text{O III}]\ \lambda 5007\,\text{Å}$) | Aquatic Emerald-Teal | `(80, 240, 170)` |
+| **`BLACK_HOLE`** | Accreting Core + Photon Sphere Ring | Crimson Red + White Ring + Void Core | `(255, 50, 70)` |
+| **`PLANET`** | Accretion / Orbital Disk Particles | Soft Sky Blue | `(90, 180, 255)` |
+| **`COMET`** | Relativistic Polar Jets & Oort Cloud | Icy Aquamarine | `(140, 255, 220)` |
+| **`ROCKY`** | Terrestrial Rocky Planets | Terracotta Rust | `(220, 130, 70)` |
+| **`GAS_GIANT`** | Jovian Gas / Ice Giants | Soft Royal Lavender | `(180, 110, 240)` |
 
 ---
 
@@ -34,17 +60,19 @@ A deterministic, ultra-high-performance 2D N-body gravitational sandbox simulati
 
 | Input / Key | Action |
 | :--- | :--- |
-| **Left Click + Drag** | Pan the camera viewport |
-| **Mouse Scroll Wheel** | Zoom in / Zoom out centered at mouse cursor |
-| **]** | Zoom in towards window center |
-| **[** | Zoom out from window center |
+| **Left Click (when Paused)** | **Select & Spectate Entity**: Lock camera onto any clicked celestial body (Black Hole, Star, Planet, Comet) |
+| **U** | **Unselect Spectator Tracking**: Return to normal free-panning camera mode |
+| **Left Click + Drag** | Pan camera viewport (cancels target tracking to restore free camera) |
+| **Mouse Scroll Wheel** | Zoom in / Zoom out centered at cursor (or centered on spectated body) |
+| **]** / **[** | Zoom in / Zoom out towards window center |
 | **SPACE** | Pause / Resume physics simulation |
-| **+** / **=** / **Up Arrow** | Double simulation speed multiplier (up to 64x) |
-| **-** / **Down Arrow** | Halve simulation speed multiplier (down to 1x) |
-| **R** | Reset camera view to frame all active particles |
-| **T** | Clear particle trail visual buffers |
+| **+** / **=** | Increase animation speed multiplier (up to **512x**) |
+| **-** | Decrease animation speed multiplier (slow motion down to **0.0625x** / **1/16th speed**) |
+| **,** / **.** (or **K** / **L**) | Adjust Motion Trail Length (**Off** to **Super**) |
+| **T** | Clear particle motion trail buffer |
+| **R** | Reset camera view & unselect target tracking |
 | **Window Resize** | Resize viewport dynamically |
-| **ESC** / **Close Window** | Exit simulation |
+| **ESC** | Clear spectator target / Exit simulation |
 
 ---
 
@@ -53,7 +81,7 @@ A deterministic, ultra-high-performance 2D N-body gravitational sandbox simulati
 Ensure you have Python 3.9+ installed, then install the required dependencies:
 
 ```bash
-pip install numpy numba pygame matplotlib scipy
+pip3 install numpy numba pygame matplotlib scipy
 ```
 
 ---
@@ -64,29 +92,34 @@ pip install numpy numba pygame matplotlib scipy
 
 ```bash
 # Default launch (Twin Galaxies, 5,000 particles)
-python main.py
+python3 main.py
 
-# Launch Solar System preset with 3,000 bodies
-python main.py --preset solar_system --N 3000
+# Launch all 9 presets:
+python3 main.py --preset twin_galaxies      # Two colliding spiral galaxies with central SMBHs
+python3 main.py --preset solar_system       # Sun + 8 major planets + Asteroid belt & Oort Cloud
+python3 main.py --preset alpha_centauri     # Alpha Centauri A/B binary + Proxima Centauri & exoplanets
+python3 main.py --preset milkomeda          # Andromeda + Milky Way + M33 dwarf satellite merger
+python3 main.py --preset cygnus_x1          # Black hole accretion disk + companion star + polar jets
+python3 main.py --preset messier13          # M13 100% Stellar Cluster (Red Giants, Pulsars, Blue Stragglers)
+python3 main.py --preset messier31          # M31 Andromeda standalone spiral galaxy
+python3 main.py --preset chaos              # 5 chaotic galaxy clusters on collision course
+python3 main.py --preset laplace            # Structured concentric deterministic rings
 
-# Launch Chaos preset with 8,000 bodies
-python main.py --preset chaos --N 8000
-
-# High-precision mode (smaller time step dt, more sub-steps per frame)
-python main.py --preset chaos --N 5000 --dt 0.0005 --spf 4
-
-# Custom particle count & trail persistence
-python main.py --N 10000 --trail-decay 0.95
+# Custom particle count & physics tuning:
+python3 main.py --preset messier13 --N 8000
+python3 main.py --preset cygnus_x1 --N 5000 --dt 0.0005 --spf 4
+python3 main.py --N 10000 --trail-decay 0.95
+python3 main.py --preset twin_galaxies --seed random
 ```
 
 ### Offline Matplotlib & Video Export
 
 ```bash
 # Interactive Matplotlib view
-python main.py --mode mpl --N 1000 --mpl-steps 5000
+python3 main.py --mode mpl --N 1000 --mpl-steps 5000
 
 # Export simulation run to high-quality MP4 (requires ffmpeg)
-python main.py --mode mpl --N 1000 --mpl-steps 5000 --save universe.mp4
+python3 main.py --mode mpl --N 1000 --mpl-steps 5000 --save universe.mp4
 ```
 
 ---
@@ -95,9 +128,10 @@ python main.py --mode mpl --N 1000 --mpl-steps 5000 --save universe.mp4
 
 ```text
 Options:
-  --preset        {twin_galaxies,solar_system,chaos,laplace} Initial condition layout (default: twin_galaxies)
+  --preset        {twin_galaxies,solar_system,chaos,laplace,alpha_centauri,milkomeda,cygnus_x1,messier13,messier31}
+                  Initial condition layout (default: twin_galaxies)
   --N INT         Target particle count (default: 5000)
-  --seed INT      Random seed for deterministic initialization (default: 42)
+  --seed STR      Random seed for deterministic initialization, or 'random' (default: "42")
   --mode          {pygame,mpl} Rendering interface (default: pygame)
   --dt FLOAT      Leapfrog integration timestep (default: 0.001)
   --eps FLOAT     Gravitational softening factor (default: 1.0)
@@ -122,7 +156,7 @@ Universe Simulation/
 │   ├── barnes_hut.py       # Parallel Barnes-Hut quadtree force evaluator (Numba JIT)
 │   └── integrator.py       # Symplectic Leapfrog KDK integration & Hamiltonian energy check
 ├── universe/
-│   └── generator.py        # Galaxy, Solar System, Chaos, and Laplace preset generators
+│   └── generator.py        # All 8 universe preset generators (Galaxies, Solar System, Cygnus X-1, etc.)
 └── renderer/
     ├── pygame_renderer.py # High-performance vectorized Pygame visualizer with HUD & trails
     └── mpl_renderer.py    # Headless Matplotlib animator & video exporter

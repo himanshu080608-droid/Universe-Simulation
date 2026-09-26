@@ -8,23 +8,31 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.animation import FuncAnimation, FFMpegWriter
-from universe.generator import STAR, PLANET, COMET, PIXEL_COLORS
+from universe.generator import (
+    STAR, PLANET, COMET, ROCKY, GAS_GIANT, BLACK_HOLE,
+    RED_GIANT, BLUE_STRAGGLER, WHITE_DWARF, NEUTRON_STAR, EMISSION_STAR,
+    PIXEL_COLORS
+)
 
 
 def _rgb_to_hex(r, g, b):
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
-_MPL_COLORS = {
-    STAR:   _rgb_to_hex(*PIXEL_COLORS[STAR]),
-    PLANET: _rgb_to_hex(*PIXEL_COLORS[PLANET]),
-    COMET:  _rgb_to_hex(*PIXEL_COLORS[COMET]),
-}
+_MPL_COLORS = {t: _rgb_to_hex(*PIXEL_COLORS[t]) for t in range(11)}
 
 _TYPE_SIZES = {
-    STAR:   40,
-    PLANET: 12,
-    COMET:  4,
+    BLACK_HOLE:     50,
+    RED_GIANT:      25,
+    BLUE_STRAGGLER: 20,
+    EMISSION_STAR:  20,
+    STAR:           18,
+    GAS_GIANT:      15,
+    ROCKY:           8,
+    WHITE_DWARF:    10,
+    NEUTRON_STAR:   10,
+    PLANET:          6,
+    COMET:           2,
 }
 
 

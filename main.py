@@ -16,14 +16,21 @@ This simulation IS that intellect — a deterministic, closed-form numerical
 integration of N gravitating particles from t=0 to t=∞.
 
 Usage:
-    python main.py                        # interactive Pygame (twin galaxies)
-    python main.py --preset solar_system  # solar system preset
-    python main.py --preset chaos         # 5 colliding clusters
-    python main.py --preset laplace       # ordered Laplacian rings
-    python main.py --N 2000               # custom particle count
-    python main.py --mode mpl             # matplotlib offline renderer
-    python main.py --mode mpl --save out.mp4  # export video
-    python main.py --no-bh                # disable Barnes-Hut (small N only)
+    python3 main.py                             # default live Pygame mode (twin_galaxies)
+    python3 main.py --preset twin_galaxies      # two colliding spiral galaxies
+    python3 main.py --preset solar_system       # Sun + 8 major planets + asteroid & Oort belt
+    python3 main.py --preset alpha_centauri     # Alpha Centauri A/B binary + Proxima & exoplanets
+    python3 main.py --preset milkomeda          # Andromeda + Milky Way + M33 galactic merger
+    python3 main.py --preset cygnus_x1          # Black hole accretion disk, companion star & polar jets
+    python3 main.py --preset messier13          # M13 100% stellar cluster (Red Giants, Pulsars, Blue Stragglers)
+    python3 main.py --preset messier31          # M31 Andromeda standalone spiral galaxy
+    python3 main.py --preset chaos              # 5 galaxy clusters on collision course
+    python3 main.py --preset laplace            # ordered Laplacian concentric rings
+    python3 main.py --seed random               # use a random layout seed (default is 42)
+    python3 main.py --N 8000                    # custom particle count
+    python3 main.py --mode mpl                  # matplotlib offline renderer
+    python3 main.py --mode mpl --save out.mp4   # export video
+    python3 main.py --no-bh                     # disable Barnes-Hut (small N direct sum)
 """
 
 import argparse
@@ -40,14 +47,14 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )
-    p.add_argument("--preset", choices=["twin_galaxies", "solar_system",
-                                         "chaos", "laplace"],
+    p.add_argument("--preset", choices=["twin_galaxies", "solar_system", "chaos", "laplace",
+                                         "alpha_centauri", "milkomeda", "cygnus_x1", "messier13", "messier31"],
                    default="twin_galaxies",
-                   help="Initial condition preset (default: twin_galaxies)")
+                   help="Initial condition preset layout (default: twin_galaxies)")
     p.add_argument("--N", type=int, default=5000,
                    help="Target particle count (default: 5000)")
-    p.add_argument("--seed", type=int, default=42,
-                   help="Random seed for reproducibility (default: 42)")
+    p.add_argument("--seed", type=str, default="42",
+                   help="Random seed for reproducibility, or 'random' for a new seed every run (default: 42)")
     p.add_argument("--mode", choices=["pygame", "mpl"], default="pygame",
                    help="Renderer: 'pygame' = live, 'mpl' = offline (default: pygame)")
     p.add_argument("--dt", type=float, default=0.001,
@@ -86,16 +93,15 @@ def run_pygame(engine, args):
         width=args.width, height=args.height,
         trail_decay=args.trail_decay
     )
-    if args.preset == "twin_galaxies":
-        # Ignore comets (type 2) for auto-fit so the initial zoom is tight 
-        # around the spectacular stellar disks, making them look large.
-        mask = engine.types != 2
+    # Ignore comets (type 2) for auto-fit so the initial zoom is tight
+    # around stars, planets, and accretion disks across all presets.
+    mask = engine.types != 2
+    if np.any(mask):
         renderer.auto_fit(engine.pos[mask])
     else:
         renderer.auto_fit(engine.pos)
     spf = args.spf
-    print(f"[Main] Starting Pygame loop. SPF={spf}  FPS target={args.fps}")
-    print( "[Main] Controls: SPACE=pause  +/-=speed  [/]=zoom  R=reset view  T=clear trails  ESC=quit")
+    print( "[Main] Controls: SPACE=pause/resume  Click(paused): spectate entity  U: unselect  +/-: speed  R: reset")
 
 
     running = True
@@ -104,11 +110,11 @@ def run_pygame(engine, args):
             break
 
         if not renderer.paused:
-            engine.step(spf * renderer.speed_mult)
+            engine.step(spf, speed_mult=renderer.speed_mult)
 
 
         renderer.render_frame(
-            engine.pos, engine.types,
+            engine.pos, engine.types, mass=engine.mass,
             energy=engine.energy,
             step=engine.step_count,
             steps_per_frame=spf
@@ -118,6 +124,7 @@ def run_pygame(engine, args):
     import pygame
     pygame.quit()
     print("[Main] Simulation ended.")
+    sys.exit(0)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -152,6 +159,12 @@ def main():
     print(f"  Preset  : {args.preset}")
     print(f"  Particles: {args.N:,}")
     print(f"  Renderer: {args.mode}")
+    import random
+    if args.seed.lower() == 'random':
+        args.seed = random.randint(0, 999999)
+    else:
+        args.seed = int(args.seed)
+
     print(f"  Seed    : {args.seed}")
     print()
 
@@ -170,7 +183,8 @@ def main():
     engine = SimulationEngine(
         pos, vel, mass, types,
         dt=args.dt, eps=args.eps, G=1.0,
-        theta=args.theta, use_bh=use_bh
+        theta=args.theta, use_bh=use_bh,
+        preset=args.preset
     )
 
     # ── 3. JIT warmup ─────────────────────────────────────────────────────────

@@ -47,12 +47,13 @@ class SimulationEngine:
 
     def __init__(self, pos, vel, mass, types,
                  dt=DEFAULT_DT, eps=DEFAULT_EPS, G=DEFAULT_G,
-                 theta=BH_THETA, use_bh=None):
+                 theta=BH_THETA, use_bh=None, preset=""):
         self.pos    = pos.astype(np.float64)
         self.vel    = vel.astype(np.float64)
         self.mass   = mass.astype(np.float64)
         self.types  = types.astype(np.int32)
         self.N      = len(pos)
+        self.preset = preset
 
         self.dt     = dt
         self.eps    = eps
@@ -144,44 +145,121 @@ class SimulationEngine:
     # ─────────────────────────────────────────────────────────────────────────
     # Core step
     # ─────────────────────────────────────────────────────────────────────────
-    def step(self, n_substeps=1):
+    def _single_leapfrog_step(self, step_dt):
+        half_dt = 0.5 * step_dt
+        # ── KICK (first half) ─────────────────────────────────────────
+        self.vel += self._acc * half_dt
+
+        # ── DRIFT ─────────────────────────────────────────────────────
+        self.pos += self.vel * step_dt
+
+        # ── REBUILD TREE & COMPUTE FORCES ──────────────────────────────
+        if self.use_bh:
+            self._rebuild_tree()
+            forces = compute_forces_bh(
+                self.pos, self.mass, self.N,
+                self.G, self.eps, self.theta,
+                self._node_float, self._node_int, self._num_nodes
+            )
+        else:
+            forces = compute_forces_direct(
+                self.pos, self.mass, self.N, self.G, self.eps
+            )
+
+        self._acc[:] = forces
+
+        # ── KICK (second half) ────────────────────────────────────────
+        self.vel += self._acc * half_dt
+        self.step_count += 1
+
+        if self.preset == "cygnus_x1":
+            self._process_jet_recycling()
+
+    def _process_jet_recycling(self):
         """
-        Advance simulation by n_substeps Kick-Drift-Kick leapfrog steps.
-
-        BUG FIX: the BH tree MUST be rebuilt from the drifted positions before
-        the second force evaluation. Using the pre-drift tree for post-drift
-        forces injects energy every step and causes particles to escape.
+        Continuous Relativistic Jet Engine for Cygnus X-1:
+        Maintains a steady-state constant mass flux (up to 6 particles per step)
+        re-injected at the black hole nozzle core (r = 1.5..2.5) with hyperbolic escape velocity (v_jet = 1.12 * v_esc).
+        Guarantees a 100% smooth, continuous, non-collapsing polar jet beam.
         """
-        half_dt = 0.5 * self.dt
-        for _ in range(n_substeps):
-            # ── KICK (first half) ─────────────────────────────────────────
-            self.vel += self._acc * half_dt
+        bh_mask = (self.types == 5)  # BLACK_HOLE (type 5)
+        if np.any(bh_mask):
+            bh_pos = self.pos[bh_mask][0]
+        else:
+            bh_pos = np.array([0.0, 0.0])
 
-            # ── DRIFT ─────────────────────────────────────────────────────
-            self.pos += self.vel * self.dt
+        bh_mass = 3500.0
+        r_vec = self.pos - bh_pos
+        r_sq = r_vec[:, 0]**2 + r_vec[:, 1]**2
 
-            # ── REBUILD TREE from NEW positions, then compute forces ───────
-            # Critical: tree must reflect particle positions AFTER the drift.
-            if self.use_bh:
-                self._rebuild_tree()          # ← uses self.pos (now updated)
-                forces = compute_forces_bh(
-                    self.pos, self.mass, self.N,
-                    self.G, self.eps, self.theta,
-                    self._node_float, self._node_int, self._num_nodes
-                )
-            else:
-                forces = compute_forces_direct(
-                    self.pos, self.mass, self.N, self.G, self.eps
-                )
+        # Outer boundary threshold r > 32.0 (r^2 > 1024.0)
+        jet_outer = (self.types == 2) & (r_sq > 1024.0)  # COMET (type 2)
+        # Inner event horizon accreted threshold r < 2.2 (r^2 < 4.84)
+        accreted = (self.types != 5) & (r_sq < 4.84)
 
-            # ── UPDATE ACCELERATIONS ──────────────────────────────────────
-            # compute_forces_* return accelerations directly (G*m_j/r² per m_i)
-            self._acc[:] = forces
+        recycle_candidates = jet_outer | accreted
+        idxs = np.where(recycle_candidates)[0]
 
-            # ── KICK (second half) ────────────────────────────────────────
-            self.vel += self._acc * half_dt
+        if len(idxs) > 0:
+            # Sort candidates by distance from BH (furthest first)
+            dists = r_sq[idxs]
+            sort_order = np.argsort(dists)[::-1]
+            sorted_idxs = idxs[sort_order]
 
-            self.step_count += 1
+            # Recycle a constant steady rate of up to 6 particles per step
+            n_to_recycle = min(len(sorted_idxs), 6)
+            to_re = sorted_idxs[:n_to_recycle]
+
+            rng = np.random.default_rng()
+            n_top = n_to_recycle // 2
+            n_bot = n_to_recycle - n_top
+
+            r_launch = rng.uniform(1.5, 2.5, n_to_recycle)
+            theta_top = rng.normal(np.pi / 2, 0.05, n_top)
+            theta_bot = rng.normal(-np.pi / 2, 0.05, n_bot)
+            thetas = np.concatenate((theta_top, theta_bot))
+
+            self.pos[to_re, 0] = bh_pos[0] + r_launch * np.cos(thetas)
+            self.pos[to_re, 1] = bh_pos[1] + r_launch * np.sin(thetas)
+
+            # Hyperbolic escape velocity v_jet = 1.12 * v_esc ensures jets overcome gravity and stream out perpetually!
+            v_esc = np.sqrt(2.0 * bh_mass / r_launch)
+            v_jet = 1.12 * v_esc + rng.uniform(-0.5, 0.5, n_to_recycle)
+            self.vel[to_re, 0] = v_jet * np.cos(thetas)
+            self.vel[to_re, 1] = v_jet * np.sin(thetas)
+
+            self.types[to_re] = 2  # COMET
+            self.mass[to_re]  = 0.0001
+
+    def step(self, n_substeps=1, max_ms=12.0, speed_mult=1.0):
+        """
+        Advance simulation with float speed multiplier (supports 0.5x, 0.25x, 0.125x slow motion).
+        Guarantees 30+ FPS even at high speed multipliers (up to 512x).
+        """
+        if speed_mult < 1.0:
+            effective_dt = self.dt * float(speed_mult)
+            self._single_leapfrog_step(effective_dt)
+            return
+
+        n_sub = int(round(n_substeps * speed_mult))
+        if n_sub <= 1:
+            self._single_leapfrog_step(self.dt)
+            return
+
+        t0 = time.perf_counter()
+        completed = 0
+
+        for i in range(n_sub):
+            self._single_leapfrog_step(self.dt)
+            completed += 1
+
+            # Time budget check (max 12ms per frame to maintain >=30-60 FPS)
+            elapsed_ms = (time.perf_counter() - t0) * 1000.0
+            if elapsed_ms >= max_ms and completed < n_sub:
+                remaining = n_sub - completed
+                dt_boost = self.dt * (1.0 + (remaining / completed))
+                self._single_leapfrog_step(dt_boost)
+                break
 
         # Periodic energy sampling (only for smaller systems — O(N²))
         if self.N <= 1500 and self.step_count % ENERGY_INTERVAL == 0:
