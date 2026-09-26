@@ -25,7 +25,7 @@ import pygame.gfxdraw
 from universe.generator import (
     STAR, PLANET, COMET, ROCKY, GAS_GIANT, BLACK_HOLE,
     RED_GIANT, BLUE_STRAGGLER, WHITE_DWARF, NEUTRON_STAR, EMISSION_STAR,
-    RED_DWARF, PIXEL_COLORS
+    RED_DWARF, ASTEROID, PIXEL_COLORS
 )
 
 
@@ -46,9 +46,17 @@ _COLOR_LUT = np.array([
     PIXEL_COLORS[NEUTRON_STAR],   # 9 — electric neon magenta
     PIXEL_COLORS[EMISSION_STAR],  # 10 — vivid emerald lime green
     PIXEL_COLORS[RED_DWARF],      # 11 — deep crimson red (M-dwarf)
-], dtype=np.uint8)   # shape (12, 3)
+    PIXEL_COLORS[ASTEROID],       # 12 — dusty grey
+], dtype=np.uint8)   # shape (13, 3)
 
-_COLOR_TUPLES = {t: PIXEL_COLORS[t] for t in range(12)}
+_COLOR_TUPLES = {t: PIXEL_COLORS[t] for t in range(13)}
+
+
+
+# Float radii allow for sub-pixel blending (Gaussian soft-dot for tiny particles)
+# Index: 0:STAR, 1:PLANET, 2:COMET, 3:ROCKY, 4:GAS_GIANT, 5:BLACK_HOLE, 6:RED_GIANT, 7:BLUE_STRAGGLER, 8:WHITE_DWARF, 9:NEUTRON_STAR, 10:EMISSION_STAR, 11:RED_DWARF, 12:ASTEROID
+_RADIUS_MAX_LUT = np.array([35.0, 3.0, 1.0, 2.0, 8.0, 40.0, 40.0, 20.0, 6.0, 5.0, 30.0, 15.0, 1.0], dtype=np.float32)
+_RADIUS_MIN_LUT = np.array([2.5, 1.0, 0.5, 1.0, 3.5, 3.0, 3.5, 3.0, 1.5, 2.0, 3.5, 2.0, 0.5], dtype=np.float32)
 
 
 def _type_to_rgb(types):
@@ -62,7 +70,24 @@ class Camera:
         self.w = width
         self.h = height
         self.zoom   = 20.0       # pixels per world unit
+        self.target_zoom = 20.0
+        self.zoom_center = (width / 2, height / 2)
+        self.is_zooming = False
         self.offset = np.array([width / 2, height / 2], dtype=np.float64)
+
+    def update_smooth_zoom(self):
+        """Called every frame to glide zoom to target_zoom."""
+        self.is_zooming = False
+        if abs(self.target_zoom - self.zoom) / self.zoom > 0.001:
+            diff = self.target_zoom - self.zoom
+            step = diff * 0.15  # lerp speed
+            factor = (self.zoom + step) / self.zoom
+            self.zoom_at(factor, self.zoom_center[0], self.zoom_center[1])
+            self.is_zooming = True
+        else:
+            if self.zoom != self.target_zoom:
+                factor = self.target_zoom / self.zoom
+                self.zoom_at(factor, self.zoom_center[0], self.zoom_center[1])
 
     def world_to_screen(self, pos):
         """
@@ -106,6 +131,7 @@ class Camera:
         cy = (pos[:, 1].max() + pos[:, 1].min()) / 2
         span = max(pos[:, 0].max() - pos[:, 0].min(), pos[:, 1].max() - pos[:, 1].min()) + 1e-6
         self.zoom   = min(self.w, self.h) * 0.85 / span
+        self.target_zoom = self.zoom
         self.offset = np.array([self.w / 2 - cx * self.zoom,
                                  self.h / 2 + cy * self.zoom], dtype=np.float64)
 
@@ -144,6 +170,136 @@ class ParticleTrailBuffer:
 
 
 from numba import njit
+
+@njit(parallel=True, fastmath=True)
+def _fast_draw_heads(buffer, fx, fy, types, mass, zoom, w, h, colors, max_r_lut, min_r_lut):
+    N = len(fx)
+    # --- PASS 1: Draw everything EXCEPT Black Holes ---
+    for i in prange(N):
+        t = types[i]
+        if t == 5:
+            continue
+            
+        x_f = fx[i]
+        y_f = fy[i]
+        ix = int(math.floor(x_f))
+        iy = int(math.floor(y_f))
+        
+        max_r = max_r_lut[t]
+        min_r = min_r_lut[t]
+        
+        m_val = 1.0
+        if mass is not None:
+            m_val = float(mass[i])
+            
+        r_val = min_r
+        
+        if t == 0 or (t >= 6 and t <= 11): # STELLAR
+            r_val += (m_val / 50.0)
+        elif t == 4: # GAS_GIANT
+            r_val += (m_val / 100.0)
+            
+        r_val = min(r_val, max_r)
+        
+        is_stellar = (t == 0) or (t >= 6 and t <= 11)
+        r_draw = r_val * (2.0 if is_stellar else 1.2)
+        r_int = int(round(r_draw))
+        r_sq_base = float(r_val * r_val)
+        
+        c_r = float(colors[i, 0])
+        c_g = float(colors[i, 1])
+        c_b = float(colors[i, 2])
+        
+        if r_int <= 0:
+            if 0 <= ix < w and 0 <= iy < h:
+                buffer[ix, iy, 0] = min(255.0, buffer[ix, iy, 0] + c_r)
+                buffer[ix, iy, 1] = min(255.0, buffer[ix, iy, 1] + c_g)
+                buffer[ix, iy, 2] = min(255.0, buffer[ix, iy, 2] + c_b)
+        else:
+            r_sq_draw = r_int * r_int
+            for dx in range(-r_int, r_int + 1):
+                for dy in range(-r_int, r_int + 1):
+                    dist2_px = dx*dx + dy*dy
+                    if dist2_px <= r_sq_draw:
+                        px = ix + dx
+                        py = iy + dy
+                        if 0 <= px < w and 0 <= py < h:
+                            dist2_norm = dist2_px / r_sq_base if r_sq_base > 0 else 0.0
+                            
+                            val = math.exp(-dist2_norm * 2.5)
+                            if is_stellar:
+                                val += 0.45 * math.exp(-dist2_norm * 0.9)
+                            else:
+                                val += 0.15 * math.exp(-dist2_norm * 1.5)
+                            
+                            factor = min(val, 1.0)
+                            buffer[px, py, 0] = min(255.0, buffer[px, py, 0] + c_r * factor)
+                            buffer[px, py, 1] = min(255.0, buffer[px, py, 1] + c_g * factor)
+                            buffer[px, py, 2] = min(255.0, buffer[px, py, 2] + c_b * factor)
+
+    # --- PASS 2: Draw ONLY Black Holes (On Top) ---
+    telescope_power = max(0.0, min(1.0, (zoom - 5.0) / 15.0))
+    void_fade = 1.0 - telescope_power
+    bh_zoom_factor = max(0.4, min(1.0, zoom / 15.0))
+    
+    for i in prange(N):
+        t = types[i]
+        if t != 5:
+            continue
+            
+        x_f = fx[i]
+        y_f = fy[i]
+        ix = int(math.floor(x_f))
+        iy = int(math.floor(y_f))
+        
+        max_r = max_r_lut[t]
+        min_r = min_r_lut[t]
+        
+        m_val = 1.0
+        if mass is not None:
+            m_val = float(mass[i])
+            
+        # Shrink the apparent size of the black hole slightly when zoomed out
+        r_val = min_r + (math.log1p(m_val) * 0.8) * bh_zoom_factor
+        r_val = min(r_val, max_r)
+        
+        r_draw = r_val * 1.5
+        r_int = int(round(r_draw))
+        r_sq_base = float(r_val * r_val)
+        
+        if r_int > 0:
+            r_sq_draw = r_int * r_int
+            for dx in range(-r_int, r_int + 1):
+                for dy in range(-r_int, r_int + 1):
+                    dist2_px = dx*dx + dy*dy
+                    if dist2_px <= r_sq_draw:
+                        px = ix + dx
+                        py = iy + dy
+                        if 0 <= px < w and 0 <= py < h:
+                            dist2_norm = dist2_px / r_sq_base if r_sq_base > 0 else 0.0
+                            dist = math.sqrt(dist2_norm)
+                            
+                            if dist < 0.35:
+                                # Event Horizon (Fades based on telescope power)
+                                buffer[px, py, 0] = buffer[px, py, 0] * void_fade
+                                buffer[px, py, 1] = buffer[px, py, 1] * void_fade
+                                buffer[px, py, 2] = buffer[px, py, 2] * void_fade
+                            elif dist < 0.5:
+                                # Photon Ring (Bright White-Gold)
+                                factor = (dist - 0.35) / 0.15
+                                intensity = math.sin(factor * math.pi)
+                                buffer[px, py, 0] = min(255.0, buffer[px, py, 0] + 255.0 * intensity)
+                                buffer[px, py, 1] = min(255.0, buffer[px, py, 1] + 200.0 * intensity)
+                                buffer[px, py, 2] = min(255.0, buffer[px, py, 2] + 150.0 * intensity)
+                            else:
+                                # Outer Accretion Disk (Soft Fading Orange-Gold)
+                                factor = 1.0 - ((dist - 0.5) / 1.0) # stretch fade over remaining distance
+                                if factor > 0:
+                                    factor = factor * factor
+                                    buffer[px, py, 0] = min(255.0, buffer[px, py, 0] + 200.0 * factor)
+                                    buffer[px, py, 1] = min(255.0, buffer[px, py, 1] + 100.0 * factor)
+                                    buffer[px, py, 2] = min(255.0, buffer[px, py, 2] + 40.0 * factor)
+
 
 @njit(parallel=True, fastmath=True)
 def _fast_splat(buffer, fx, fy, prev_fx, prev_fy, colors, w, h, intensity, draw_lines):
@@ -200,16 +356,16 @@ def _fast_splat(buffer, fx, fy, prev_fx, prev_fy, colors, w, h, intensity, draw_
 # Guaranteed size hierarchy at ALL zoom levels (zoomed out or zoomed in):
 #   comet (1px) <= planet/asteroid (1px) < rocky planet (1-2px) < gas giant (2-4px) < star (3-6px) < BH (6-12px)
 _TYPE_MAX_RADIUS = {
-    BLACK_HOLE:     12,  # Crimson Red core with photon ring & event horizon
-    RED_GIANT:      10,  # Deep Ruby Red expanded giant envelope
-    BLUE_STRAGGLER:  8,  # Luminous Ice Blue star
-    EMISSION_STAR:   8,  # Aquatic Emerald Teal emission star
-    STAR:            6,  # Warm Cream Gold main sequence star
-    RED_DWARF:       4,  # Deep Crimson Red M-type dwarf
-    GAS_GIANT:       3,  # Electric Royal Violet gas giant (Jupiter/Saturn scale)
-    WHITE_DWARF:     3,  # Diamond Pearl White compact remnant
-    NEUTRON_STAR:    3,  # Soft Violet-Indigo pulsar
-    ROCKY:           2,  # Terracotta Rust terrestrial rocky planet (Earth/Mars scale)
+    BLACK_HOLE:      6,  # Crimson Red core with photon ring & event horizon
+    RED_GIANT:       4,  # Deep Ruby Red expanded giant envelope
+    BLUE_STRAGGLER:  4,  # Luminous Ice Blue star
+    EMISSION_STAR:   4,  # Aquatic Emerald Teal emission star
+    STAR:            3,  # Warm Cream Gold main sequence star
+    RED_DWARF:       2,  # Deep Crimson Red M-type dwarf
+    GAS_GIANT:       2,  # Electric Royal Violet gas giant (Jupiter/Saturn scale)
+    WHITE_DWARF:     2,  # Diamond Pearl White compact remnant
+    NEUTRON_STAR:    2,  # Soft Violet-Indigo pulsar
+    ROCKY:           1,  # Terracotta Rust terrestrial rocky planet (Earth/Mars scale)
     PLANET:          1,  # Soft Cyan / Sky Blue orbital disk dot
     COMET:           1,  # Pale Ice Mint comet trail dot
 }
@@ -371,7 +527,6 @@ class PygameRenderer:
                     self.paused = not self.paused
                 elif event.key == pygame.K_u:                  # U → unselect spectator tracking
                     self.tracked_particle = None
-                    self.paused = False
                 elif event.key in (pygame.K_PLUS, pygame.K_EQUALS):
                     self.speed_mult = min(self.speed_mult * 2.0, 512.0)
                 elif event.key == pygame.K_MINUS:
@@ -389,46 +544,48 @@ class PygameRenderer:
                 elif event.key == pygame.K_t:
                     self.trail_buffer[:] = 0
                 elif event.key == pygame.K_RIGHTBRACKET:   # ] → zoom in
-                    self.camera.zoom_at(1.30, self.w // 2, self.h // 2)
-                    self.trail_buffer[:] = 0
+                    self.camera.target_zoom = np.clip(self.camera.target_zoom * 1.30, 0.0001, 100000.0)
+                    self.camera.zoom_center = (self.w // 2, self.h // 2)
                 elif event.key == pygame.K_LEFTBRACKET:    # [ → zoom out
-                    self.camera.zoom_at(1 / 1.30, self.w // 2, self.h // 2)
-                    self.trail_buffer[:] = 0
+                    self.camera.target_zoom = np.clip(self.camera.target_zoom / 1.30, 0.0001, 100000.0)
+                    self.camera.zoom_center = (self.w // 2, self.h // 2)
             elif event.type == pygame.MOUSEWHEEL:
                 mx, my = pygame.mouse.get_pos()
                 # If spectating, lock zoom center at screen center
                 zx, zy = (self.w // 2, self.h // 2) if self.tracked_particle is not None else (mx, my)
                 factor = 1.15 if event.y > 0 else 1 / 1.15
-                self.camera.zoom_at(factor, zx, zy)
-                self.trail_buffer[:] = 0
+                self.camera.target_zoom = np.clip(self.camera.target_zoom * factor, 0.0001, 100000.0)
+                self.camera.zoom_center = (zx, zy)
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:
-                    # Feature: When simulation is PAUSED, click selects a celestial entity to spectate!
-                    if self.paused and len(pos) > 0:
-                        mx, my = event.pos
-                        sp = self.camera.world_to_screen(pos)
-                        d2 = (sp[:, 0] - mx)**2 + (sp[:, 1] - my)**2
-                        min_idx = int(np.argmin(d2))
-                        if d2[min_idx] <= 25.0**2:
-                            self.tracked_particle = min_idx
-                            # Immediately center camera on selected particle
-                            target_world = pos[min_idx]
-                            new_offset = np.array([
-                                self.w / 2 - target_world[0] * self.camera.zoom,
-                                self.h / 2 + target_world[1] * self.camera.zoom
-                            ], dtype=np.float64)
-                            _shift_trail_buffer_subpixel(self.trail_buffer,
-                                                         float(new_offset[0] - self.camera.offset[0]),
-                                                         float(new_offset[1] - self.camera.offset[1]),
-                                                         self.w, self.h)
-                            self.camera.offset = new_offset
-                            continue
-
                     self._drag = True
                     self._drag_last = event.pos
+                    self._drag_start_pos = event.pos
             elif event.type == pygame.MOUSEBUTTONUP:
                 if event.button == 1:
                     self._drag = False
+                    # Feature: When simulation is PAUSED, clicking (without dragging) selects a celestial entity to spectate!
+                    if hasattr(self, '_drag_start_pos'):
+                        dx = event.pos[0] - self._drag_start_pos[0]
+                        dy = event.pos[1] - self._drag_start_pos[1]
+                        if self.paused and len(pos) > 0 and (dx*dx + dy*dy) < 25.0:
+                            mx, my = event.pos
+                            sp = self.camera.world_to_screen(pos)
+                            d2 = (sp[:, 0] - mx)**2 + (sp[:, 1] - my)**2
+                            min_idx = int(np.argmin(d2))
+                            if d2[min_idx] <= 25.0**2:
+                                self.tracked_particle = min_idx
+                                # Immediately center camera on selected particle
+                                target_world = pos[min_idx]
+                                new_offset = np.array([
+                                    self.w / 2 - target_world[0] * self.camera.zoom,
+                                    self.h / 2 + target_world[1] * self.camera.zoom
+                                ], dtype=np.float64)
+                                _shift_trail_buffer_subpixel(self.trail_buffer,
+                                                             float(new_offset[0] - self.camera.offset[0]),
+                                                             float(new_offset[1] - self.camera.offset[1]),
+                                                             self.w, self.h)
+                                self.camera.offset = new_offset
             elif event.type == pygame.MOUSEMOTION:
                 if self._drag:
                     # Dragging camera cancels spectator tracking to restore free camera mode
@@ -456,6 +613,11 @@ class PygameRenderer:
         mass:  (N,)  float64 particle mass (optional, used for smart star sizing)
         """
         t0 = time.perf_counter()
+
+        # Smooth zoom transition
+        self.camera.update_smooth_zoom()
+        if self.camera.is_zooming:
+            self.trail_buffer[:] = 0
 
         # Track previous positions for smooth trail interpolation
         if not hasattr(self, 'prev_pos') or len(self.prev_pos) != len(pos):
@@ -513,84 +675,34 @@ class PygameRenderer:
         # ── Pass 1: 1-Pixel Thick DDA Line Splatting ─────
         _fast_splat(self.trail_buffer, fx, fy, fx_prev, fy_prev, colors, self.w, self.h, splat_intensity, draw_lines)
 
-        # Push trail buffer to Pygame surface FIRST
-        surf_array = np.clip(self.trail_buffer, 0, 255).astype(np.uint8)
+        # ── Pass 2: Fast Numba Additive Heads ────────────────────────
+        # Copy trail buffer to avoid leaving permanent blobs
+        display_buffer = self.trail_buffer.copy()
+        
+        # Optionally pass a dummy array for mass if None to satisfy numba typing
+        mass_array = mass if mass is not None else np.zeros(0, dtype=np.float64)
+        _fast_draw_heads(display_buffer, fx, fy, types, mass_array if mass is not None else None, zoom, self.w, self.h, colors, _RADIUS_MAX_LUT, _RADIUS_MIN_LUT)
+
+        # Draw Spectator Target Reticle
+        if self.tracked_particle is not None and 0 <= self.tracked_particle < len(types):
+            tx, ty = int(round(sx[self.tracked_particle])), int(round(sy[self.tracked_particle]))
+            ttype = int(types[self.tracked_particle])
+            t_max_r = _RADIUS_MAX_LUT[ttype]
+            tr = max(4, min(t_max_r, int(t_max_r * zoom / 20.0)))
+            pulse = int(math.sin(time.perf_counter() * 8.0) * 3.0)
+            r_reticle = max(8, tr + 8 + pulse)
+            
+            # Simple bounds check for reticle drawing on numpy buffer
+            for angle in np.linspace(0, 2*np.pi, 30):
+                px = int(tx + r_reticle * math.cos(angle))
+                py = int(ty + r_reticle * math.sin(angle))
+                if 0 <= px < self.w and 0 <= py < self.h:
+                    display_buffer[px, py] = [0, 240, 255]
+
+        # Push display buffer to Pygame surface
+        surf_array = np.clip(display_buffer, 0, 255).astype(np.uint8)
         surf = pygame.surfarray.make_surface(surf_array)
         self.screen.blit(surf, (0, 0))
-
-        # ── Pass 2: stars, planets, comets & black hole → anti-aliased filled circles ──
-        # Draw directly onto screen buffer using gfxdraw for anti-aliased round edges
-        # Sort indices by type integer so non-BH particles are drawn first, BLACK_HOLE last on top!
-        if len(types) > 0:
-            idxs = np.arange(len(types))
-            type_order = types[idxs]
-            sorted_order = np.argsort(type_order)
-            idxs = idxs[sorted_order]
-
-            zoom = self.camera.zoom
-            w, h = self.w, self.h
-            screen = self.screen
-
-            for i in idxs:
-                x, y = int(round(sx[i])), int(round(sy[i]))
-                if -30 <= x < w + 30 and -30 <= y < h + 30:
-                    t = int(types[i])
-                    max_r = _TYPE_MAX_RADIUS.get(t, 2)
-                    min_r = _TYPE_MIN_RADIUS.get(t, 1)
-                    col   = _COLOR_TUPLES.get(t, (200, 200, 200))
-
-                    # Dynamic smooth zoom scaling between min_r and max_r
-                    r_val = min_r + (max_r - min_r) * np.clip((zoom - 6.0) / 35.0, 0.0, 1.0)
-                    r = int(round(r_val))
-
-                    # Mass-based stellar scaling for stars & supermassive black holes
-                    if mass is not None and t in (STAR, RED_GIANT, BLUE_STRAGGLER, EMISSION_STAR, BLACK_HOLE, RED_DWARF):
-                        m_val = float(mass[i])
-                        if t == BLACK_HOLE:
-                            m_scale = np.clip(m_val ** 0.3, 1.0, 5.0)
-                        else:
-                            m_scale = np.clip(m_val ** 0.25, 0.6, 2.0)
-                        r = int(round(r * m_scale))
-
-                    if t == BLACK_HOLE:
-                        # 1. Outer Photon Sphere Glow Ring (Crisp White Boundary)
-                        pygame.gfxdraw.aacircle(screen, x, y, r + 2, (255, 255, 255))
-                        # 2. Accretion Core (Radiant Crimson)
-                        pygame.gfxdraw.filled_circle(screen, x, y, r, col)
-                        pygame.gfxdraw.aacircle(screen, x, y, r, col)
-                        # 3. Pitch-Black Event Horizon Shadow Core
-                        if r >= 4:
-                            r_bh = max(2, int(r * 0.75))
-                            pygame.gfxdraw.filled_circle(screen, x, y, r_bh, (0, 0, 0))
-                            pygame.gfxdraw.aacircle(screen, x, y, r_bh, (0, 0, 0))
-                    else:
-                        if r > 0:
-                            pygame.gfxdraw.filled_circle(screen, x, y, r, col)
-                            pygame.gfxdraw.aacircle(screen, x, y, r, col)
-                        elif r == 0:
-                            pygame.gfxdraw.pixel(screen, x, y, col)
-
-            # Draw Spectator Target Reticle over tracked particle
-            if self.tracked_particle is not None and 0 <= self.tracked_particle < len(types):
-                tx = int(round(sx[self.tracked_particle]))
-                ty = int(round(sy[self.tracked_particle]))
-                ttype = int(types[self.tracked_particle])
-                t_max_r = _TYPE_MAX_RADIUS.get(ttype, 3)
-                tr = max(4, min(t_max_r, int(t_max_r * zoom / 20.0)))
-
-                # Pulse reticle animation
-                pulse = int(math.sin(time.perf_counter() * 8.0) * 3.0)
-                r_reticle = max(8, tr + 8 + pulse)
-
-                # Cyan targeting double ring & crosshair ticks
-                pygame.gfxdraw.aacircle(screen, tx, ty, r_reticle, (0, 240, 255))
-                pygame.gfxdraw.aacircle(screen, tx, ty, r_reticle + 1, (0, 200, 255))
-
-                l = 6
-                pygame.draw.line(screen, (0, 255, 255), (tx - r_reticle - l, ty), (tx - r_reticle + 2, ty), 2)
-                pygame.draw.line(screen, (0, 255, 255), (tx + r_reticle - 2, ty), (tx + r_reticle + l, ty), 2)
-                pygame.draw.line(screen, (0, 255, 255), (tx, ty - r_reticle - l), (tx, ty - r_reticle + 2), 2)
-                pygame.draw.line(screen, (0, 255, 255), (tx, ty + r_reticle - 2), (tx, ty + r_reticle + l), 2)
 
         # ── HUD overlay ──────────────────────────────────────────────
         self._draw_hud(pos, types, mass, energy, step, steps_per_frame, t0)

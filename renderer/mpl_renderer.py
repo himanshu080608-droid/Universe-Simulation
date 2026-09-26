@@ -10,7 +10,7 @@ import matplotlib.colors as mcolors
 from matplotlib.animation import FuncAnimation, FFMpegWriter
 from universe.generator import (
     STAR, PLANET, COMET, ROCKY, GAS_GIANT, BLACK_HOLE,
-    RED_GIANT, BLUE_STRAGGLER, WHITE_DWARF, NEUTRON_STAR, EMISSION_STAR,
+    RED_GIANT, BLUE_STRAGGLER, WHITE_DWARF, NEUTRON_STAR, EMISSION_STAR, RED_DWARF,
     PIXEL_COLORS
 )
 
@@ -19,20 +19,21 @@ def _rgb_to_hex(r, g, b):
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
-_MPL_COLORS = {t: _rgb_to_hex(*PIXEL_COLORS[t]) for t in range(11)}
+_MPL_COLORS = {t: _rgb_to_hex(*PIXEL_COLORS[t]) for t in range(12)}
 
 _TYPE_SIZES = {
-    BLACK_HOLE:     50,
-    RED_GIANT:      25,
-    BLUE_STRAGGLER: 20,
-    EMISSION_STAR:  20,
-    STAR:           18,
-    GAS_GIANT:      15,
-    ROCKY:           8,
-    WHITE_DWARF:    10,
-    NEUTRON_STAR:   10,
-    PLANET:          6,
-    COMET:           2,
+    BLACK_HOLE:     20,
+    RED_GIANT:      10,
+    BLUE_STRAGGLER:  8,
+    EMISSION_STAR:   8,
+    STAR:            4,
+    GAS_GIANT:       3,
+    ROCKY:           2,
+    WHITE_DWARF:     2,
+    NEUTRON_STAR:    2,
+    PLANET:          1,
+    COMET:           0.5,
+    RED_DWARF:       3,
 }
 
 
@@ -91,7 +92,7 @@ class MatplotlibRenderer:
             sc = ax.scatter(
                 self.hist[0, mask, 0], self.hist[0, mask, 1],
                 s=_TYPE_SIZES[t], c=_MPL_COLORS[t],
-                alpha=0.85, lw=0, label=type_labels[t], zorder=5
+                alpha=0.55, lw=0, label=type_labels[t], zorder=5
             )
             self.scatters[t] = (sc, mask)
 

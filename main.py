@@ -17,10 +17,10 @@ integration of N gravitating particles from t=0 to t=∞.
 
 Usage:
     python3 main.py                             # default live Pygame mode (twin_galaxies)
-    python3 main.py --preset twin_galaxies      # two colliding spiral galaxies
+    python3 main.py --preset twin_galaxies      # two colliding spiral galaxies with central SMBHs
     python3 main.py --preset solar_system       # Sun + 8 major planets + asteroid & Oort belt
     python3 main.py --preset alpha_centauri     # Alpha Centauri A/B binary + Proxima & exoplanets
-    python3 main.py --preset milkomeda          # Andromeda + Milky Way + M33 galactic merger
+    python3 main.py --preset milkomeda          # Andromeda + Milky Way + M33 triple galactic merger
     python3 main.py --preset cygnus_x1          # Black hole accretion disk, companion star & polar jets
     python3 main.py --preset messier13          # M13 100% stellar cluster (Red Giants, Pulsars, Blue Stragglers)
     python3 main.py --preset messier31          # M31 Andromeda standalone spiral galaxy
@@ -31,6 +31,17 @@ Usage:
     python3 main.py --mode mpl                  # matplotlib offline renderer
     python3 main.py --mode mpl --save out.mp4   # export video
     python3 main.py --no-bh                     # disable Barnes-Hut (small N direct sum)
+
+Controls (Pygame Mode):
+    Left Drag          : Pan camera viewport freely
+    Left Click (Paused): Spectate entity (locks camera onto star, planet, or black hole)
+    Scroll Wheel       : Smooth exponential zoom centered at cursor
+    U / ESC            : Unselect target spectating / return to free camera
+    SPACE              : Pause / resume simulation
+    + / -              : Acceleration speed multiplier (0.0625x to 512x)
+    , / . (or K / L)   : Adjust particle motion trail persistence
+    T                  : Clear trail buffer
+    R                  : Reset camera view & center galaxy
 """
 
 import argparse
@@ -93,15 +104,31 @@ def run_pygame(engine, args):
         width=args.width, height=args.height,
         trail_decay=args.trail_decay
     )
-    # Ignore comets (type 2) for auto-fit so the initial zoom is tight
-    # around stars, planets, and accretion disks across all presets.
-    mask = engine.types != 2
-    if np.any(mask):
-        renderer.auto_fit(engine.pos[mask])
-    else:
-        renderer.auto_fit(engine.pos)
     spf = args.spf
-    print( "[Main] Controls: SPACE=pause/resume  Click(paused): spectate entity  U: unselect  +/-: speed  R: reset")
+
+    # Smart initial zoom: fit only the inner stellar disk (non-comet, within
+    # the 80th-percentile radius from the centroid) so the view starts
+    # comfortably zoomed in — not a tiny dot, not an overwhelming wall of stars.
+    # Comets (type 2) are ignored because their outer halo would zoom the camera
+    # all the way out, making the dense disk look like a clump of billiard balls.
+    _mask = engine.types != 2          # exclude comets
+    _fit_pos = engine.pos[_mask] if np.any(_mask) else engine.pos
+    if len(_fit_pos) > 0:
+        _cx = np.median(_fit_pos[:, 0])
+        _cy = np.median(_fit_pos[:, 1])
+        _r  = np.linalg.norm(_fit_pos - np.array([_cx, _cy]), axis=1)
+        # Use 80th-percentile radius so outlier stars don't force a tiny zoom
+        _r80  = np.percentile(_r, 80)
+        _span = max(_r80 * 2.0, 1.0)   # diameter of the inner disk
+        _zoom = min(args.width, args.height) * 0.50 / _span
+        renderer.camera.zoom   = _zoom
+        renderer.camera.target_zoom = _zoom
+        renderer.camera.offset = np.array([
+            args.width  / 2 - _cx * _zoom,
+            args.height / 2 + _cy * _zoom,
+        ], dtype=np.float64)
+
+    print("[Main] Controls: Left-Drag=pan  Click(paused)=spectate entity  Scroll=smooth zoom  U/ESC=unselect  SPACE=pause  +/-=speed  T=clear trails  R=reset")
 
 
     running = True
