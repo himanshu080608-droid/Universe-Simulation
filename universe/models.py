@@ -236,6 +236,12 @@ class ExponentialDisk(AstronomicalModel):
         
         pos = np.column_stack((r * np.cos(th), r * np.sin(th)))
         
+        # Mathematical Velocity Model:
+        # 1. The radial mass model is the truncated exponential disk.
+        # 2. The velocity model uses a spherical-equivalent approximation of enclosed mass.
+        # 3. The production simulation itself uses a 2-D softened pairwise N-body force.
+        # 4. This initialization is therefore an approximation calibrated against the engine,
+        #    not an exact analytical equilibrium.
         frac = (exp_disk_cdf(r / self.r_scale) - F0) / (F1 - F0)
         M_enc_disk = self.M_d * np.clip(frac, 0.0, 1.0)
         
