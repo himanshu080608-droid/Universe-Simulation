@@ -131,7 +131,7 @@ class StellarCluster:
 class OrbitalPlanetBelt:
     """
     Ring of PLANET particles in near-circular orbits.
-    Vis-viva: v_orb = sqrt(G * M_central / r), G = 1.
+    Softened circular orbit: v_orb = softened_v_circ(G, M_central, r).
     """
     def __init__(self, center=(0.0, 0.0), drift=(0.0, 0.0),
                  num_planets=50, r_min=3.0, r_max=6.5,
@@ -153,7 +153,7 @@ class OrbitalPlanetBelt:
 
         pos = np.column_stack((r * np.cos(theta), r * np.sin(theta))) + self.center
 
-        v_orb = np.sqrt(self.G * self.M / r)
+        v_orb = softened_v_circ(self.G, self.M, r)
         # Tiny eccentricity: ±2% random perturbation
         v_eps = rng.normal(0, 0.02 * v_orb)
         v_orb = v_orb + v_eps
@@ -451,7 +451,7 @@ def build_universe(preset="twin_galaxies", N_total=5000, seed=42):
             r_sim  = r_au * AU
             m_body = M_earth * me
 
-            v_orb = np.sqrt(star_mass / max(r_sim, 0.5))
+            v_orb = softened_v_circ(1.0, star_mass, r_sim)
 
             theta0 = rng.uniform(0, 2 * np.pi)
             px = r_sim * np.cos(theta0)
@@ -469,7 +469,8 @@ def build_universe(preset="twin_galaxies", N_total=5000, seed=42):
                 n_ring = 60
                 r_ring_local = rng.uniform(2.0, 4.5, n_ring)
                 angles = np.linspace(0, 2 * np.pi, n_ring, endpoint=False)
-                v_ring_local = np.sqrt(m_body / r_ring_local)
+                # Softened local ring orbital speed around Saturn
+                v_ring_local = softened_v_circ(1.0, m_body, r_ring_local)
                 ring_pos = np.column_stack((px + r_ring_local * np.cos(angles), py + r_ring_local * np.sin(angles)))
                 ring_vel = np.column_stack((vx - v_ring_local * np.sin(angles), vy + v_ring_local * np.cos(angles)))
                 all_pos.append(ring_pos); all_vel.append(ring_vel)
@@ -588,12 +589,16 @@ def build_universe(preset="twin_galaxies", N_total=5000, seed=42):
         # Alpha Centauri A & B orbit their center of mass
         r_A = a_bin * (m_B / m_binary)
         r_B = a_bin * (m_A / m_binary)
-        v_bin = np.sqrt(m_binary / a_bin)
+        # Softened binary omega: omega^2 = G*(m1+m2) / (d^2+eps^2)^(3/2)
+        _eps = _EPS
+        omega_bin = np.sqrt(m_binary / (a_bin**2 + _eps**2)**1.5)
+        v_A = omega_bin * r_A   # CoM orbital speed of A
+        v_B = omega_bin * r_B   # CoM orbital speed of B
 
         pos_A = np.array([[-r_A, 0.0]])
-        vel_A = np.array([[0.0, -v_bin * (m_B / m_binary)]])
+        vel_A = np.array([[0.0, -v_A]])
         pos_B = np.array([[r_B, 0.0]])
-        vel_B = np.array([[0.0, v_bin * (m_A / m_binary)]])
+        vel_B = np.array([[0.0,  v_B]])
 
         all_pos.extend([pos_A, pos_B])
         all_vel.extend([vel_A, vel_B])
@@ -604,7 +609,7 @@ def build_universe(preset="twin_galaxies", N_total=5000, seed=42):
         # Real distance is 13,000 AU, but for visual framing we compress it to 150.0
         r_prox = 150.0
         m_prox = 60.0
-        v_prox = np.sqrt(m_binary / r_prox)
+        v_prox = softened_v_circ(1.0, m_binary, r_prox)
         theta_p = np.radians(45.0)
         pos_P = np.array([[r_prox * np.cos(theta_p), r_prox * np.sin(theta_p)]])
         vel_P = np.array([[-v_prox * np.sin(theta_p), v_prox * np.cos(theta_p)]])
@@ -935,7 +940,7 @@ def build_universe(preset="twin_galaxies", N_total=5000, seed=42):
         all_p, all_v, all_m, all_t = [[0.0, 0.0]], [[0.0, 0.0]], [star_mass], [STAR]
         
         r_orbit = 35.0
-        v_orbit = np.sqrt(1.0 * star_mass / r_orbit)
+        v_orbit = softened_v_circ(1.0, star_mass, r_orbit)
         n_ast = N_total - 1
         
         # Start them as a somewhat dispersed cloud so it's visible immediately
