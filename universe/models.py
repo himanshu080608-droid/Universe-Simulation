@@ -236,7 +236,8 @@ class ExponentialDisk(AstronomicalModel):
         
         pos = np.column_stack((r * np.cos(th), r * np.sin(th)))
         
-        M_enc_disk = self.M_d * (1.0 - (1.0 + r/self.r_scale) * np.exp(-r/self.r_scale))
+        frac = (exp_disk_cdf(r / self.r_scale) - F0) / (F1 - F0)
+        M_enc_disk = self.M_d * np.clip(frac, 0.0, 1.0)
         
         # NFW Enclosed Mass
         def nfw_mass_frac(x):

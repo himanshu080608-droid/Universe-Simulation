@@ -245,24 +245,21 @@ class GalacticDisk:
         all_mass = [np.array([smbh_mass])]
         all_type = [np.array([BLACK_HOLE], dtype=np.int32)]
 
+        # Define the mathematically exact truncated exponential disk mass model
+        # which represents the stellar mass distribution (90% of disk mass).
+        R_d = self.R * 0.2
+        x_min = (0.05 * self.R) / R_d
+        x_max = self.R / R_d
+        
+        def exp_disk_cdf(x):
+            return 1.0 - (1.0 + x) * np.exp(-x)
+            
+        F0 = exp_disk_cdf(x_min)
+        F1 = exp_disk_cdf(x_max)
+
         # ── Stellar disk (Spiral Arms) ────────────────────────────────────────
         if self.n_stars > 0:
-            # R_d is the exponential scale length. We map the old parameter a = self.R * 0.2
-            # directly to R_d to preserve the normalized simulation visual extent.
-            R_d = self.R * 0.2
-            a = R_d # Preserve 'a' for circular velocity backward compatibility
-            
-            # The previous Hernquist-like sampler truncated implicitly.
-            # We explicitly enforce realistic simulation bounds (R_min to prevent
-            # overlap with the SMBH, R_max to respect the user's disk_radius).
-            x_min = (0.05 * self.R) / R_d
-            x_max = self.R / R_d
-            
-            def exp_disk_cdf(x):
-                return 1.0 - (1.0 + x) * np.exp(-x)
-                
-            F0 = exp_disk_cdf(x_min)
-            F1 = exp_disk_cdf(x_max)
+            # R_d, F0, F1 are defined above to share with planetary velocity calculations.
             
             u_rand = self.rng.uniform(0.0, 1.0, self.n_stars)
             target_F = F0 + u_rand * (F1 - F0)
@@ -286,8 +283,10 @@ class GalacticDisk:
 
             sp = np.column_stack((r * np.cos(theta), r * np.sin(theta))) + self.center
             
-            # Softened circular velocity — matches Barnes-Hut engine exactly
-            star_M_enc = star_mass_total * (r**2) / ((r + a)**2)
+            # Enclosed mass for the truncated exponential disk (Spherical Approximation)
+            # This balances the generated density distribution against the actual softened engine forces.
+            frac = (exp_disk_cdf(r / R_d) - F0) / (F1 - F0)
+            star_M_enc = star_mass_total * np.clip(frac, 0.0, 1.0)
             M_enc  = smbh_mass + star_M_enc
             v_circ = softened_v_circ(self.G, M_enc, r)
             
@@ -317,9 +316,9 @@ class GalacticDisk:
             
             pp = np.column_stack((r * np.cos(theta), r * np.sin(theta))) + self.center
             
-            # Softened circular velocity — matches Barnes-Hut engine exactly
-            a_star     = self.R * 0.2
-            star_M_enc = star_mass_total * (r**2) / ((r + a_star)**2)
+            # Planetary velocities must use the actual newly corrected stellar mass distribution!
+            frac = (exp_disk_cdf(r / R_d) - F0) / (F1 - F0)
+            star_M_enc = star_mass_total * np.clip(frac, 0.0, 1.0)
             M_enc  = smbh_mass + star_M_enc
             v_orb  = softened_v_circ(self.G, M_enc, r)
             v_orb += self.rng.normal(0, 0.015 * v_orb)
