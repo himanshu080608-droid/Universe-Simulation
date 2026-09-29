@@ -388,5 +388,117 @@ class TestPygameRendererVisuals(unittest.TestCase):
         mean_diff = np.mean(diff)
         self.assertLess(mean_diff, 1.0, f"Mean pixel difference {mean_diff} exceeds tolerance")
 
+    def test_O_advanced_default_pygame_regression(self):
+        """Test the real application path via main.main() with AdvancedTaichiEngine default."""
+        import sys
+        import main
+        from PIL import Image
+        
+        preset = "castor_sextuple"
+        baseline_path = os.path.join(os.path.dirname(__file__), f"baselines/{preset}_advanced_default_initial.png")
+        
+        old_argv = sys.argv
+        sys.argv = [
+            "main.py",
+            "--preset", preset,
+            "--N", "2000",
+            "--seed", "42",
+            "--mode", "pygame",
+            "--spf", "1",
+            "--fps", "60",
+            "--width", "800",
+            "--height", "800"
+        ]
+        
+        original_run_pygame = main.run_pygame
+        
+        # We need to capture the engine, run exactly 1 render_frame without advancing physics,
+        # and capture the rgb surface.
+        captured_engine = None
+        captured_surface = None
+        
+        def run_pygame_wrapper(engine, args):
+            nonlocal captured_engine, captured_surface
+            captured_engine = engine
+            
+            # Disable physics advancement
+            engine.step = lambda *a, **k: None
+            
+            # Patch renderer
+            original_init = PygameRenderer.__init__
+            def patched_init(self, *r_args, **r_kwargs):
+                original_init(self, *r_args, **r_kwargs)
+                self._draw_hud = lambda *a, **k: None # disable HUD
+            PygameRenderer.__init__ = patched_init
+            
+            original_handle_events = PygameRenderer._handle_events
+            frames = 0
+            def patched_handle_events(self, pos):
+                nonlocal frames
+                if frames >= 1:
+                    return False
+                frames += 1
+                return original_handle_events(self, pos)
+            PygameRenderer._handle_events = patched_handle_events
+            
+            original_render_frame = PygameRenderer.render_frame
+            def patched_render_frame(self, *r_args, **r_kwargs):
+                ret = original_render_frame(self, *r_args, **r_kwargs)
+                nonlocal captured_surface
+                captured_surface = pygame.surfarray.array3d(self.screen)
+                return ret
+            PygameRenderer.render_frame = patched_render_frame
+            
+            try:
+                original_run_pygame(engine, args)
+            finally:
+                PygameRenderer.__init__ = original_init
+                PygameRenderer._handle_events = original_handle_events
+                PygameRenderer.render_frame = original_render_frame
+                
+        main.run_pygame = run_pygame_wrapper
+        
+        try:
+            try:
+                main.main()
+            except SystemExit as e:
+                self.assertEqual(e.code, 0)
+                
+            self.assertIsNotNone(captured_engine)
+            self.assertEqual(type(captured_engine).__name__, "AdvancedTaichiEngine")
+            self.assertIsNotNone(captured_surface)
+            
+            arr = np.transpose(captured_surface, (1, 0, 2))
+            
+            if not os.path.exists(baseline_path):
+                Image.fromarray(arr.astype(np.uint8)).save(baseline_path)
+                print(f"Generated new baseline: {baseline_path}")
+                baseline_img = arr
+            else:
+                baseline_img = np.array(Image.open(baseline_path).convert("RGB"))
+                
+            self.assertEqual(arr.shape[:2], (800, 800), "Surface is not 800x800")
+            self.assertEqual(arr.shape, baseline_img.shape, "Dimension mismatch")
+            diff = np.abs(arr.astype(int) - baseline_img.astype(int))
+            mean_diff = np.mean(diff)
+            self.assertLess(mean_diff, 1.0, f"Mean pixel difference {mean_diff} exceeds tolerance")
+            
+            arr1 = arr.copy()
+            
+            # RUN 2 for exact determinism
+            captured_engine = None
+            captured_surface = None
+            try:
+                main.main()
+            except SystemExit as e:
+                self.assertEqual(e.code, 0)
+                
+            arr2 = np.transpose(captured_surface, (1, 0, 2))
+            np.testing.assert_array_equal(arr1, arr2, "Bit-for-bit RGB determinism failed")
+            
+        finally:
+            main.run_pygame = original_run_pygame
+            sys.argv = old_argv
+
 if __name__ == '__main__':
     unittest.main()
