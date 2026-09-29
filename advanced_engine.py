@@ -1,5 +1,6 @@
 import taichi as ti
 import numpy as np
+from physics.integrator import compute_energy
 
 ti.init(arch=ti.gpu, fast_math=True)
 
@@ -165,21 +166,61 @@ class AdvancedTaichiEngine:
                 self.ti_acc[i] = a_i
                 self.ti_jerk[i] = j_i
 
+    @ti.kernel
+    def sync_active_to_pred(self, sys_step: ti.i32):
+        """
+        After active_force_and_correct() has written corrected (pc, vc) into
+        ti_pos[i] / ti_vel[i], copy those corrected values back into
+        ti_pred_pos[i] / ti_pred_vel[i] for every particle that was active
+        at this sys_step.
+
+        Without this, the exported self.pos / self.vel would contain the
+        pre-correction Taylor predictor for active particles, causing a
+        systematic state-contract violation: the renderer sees un-corrected
+        positions even though the engine has already advanced those particles.
+
+        Inactive particles are untouched: their ti_pred_* values remain the
+        Taylor prediction to the current global time (correct by definition).
+        """
+        for i in range(self.N):
+            if sys_step % self.ti_step_interval[i] == 0:
+                self.ti_pred_pos[i] = self.ti_pos[i]
+                self.ti_pred_vel[i] = self.ti_vel[i]
+
+
     def step(self, n_substeps=1, max_ms=12.0, speed_mult=1.0):
         n_sub = max(1, int(round(n_substeps * float(speed_mult))))
-        
+
         for _ in range(n_sub):
             self.sys_step += 1
-            
+
             self.global_predict(self.sys_step)
             self.active_force_and_correct(self.sys_step)
-            
+            # Propagate corrected states back into pred fields for active particles,
+            # so the exported pos/vel always reflect the true physical state.
+            self.sync_active_to_pred(self.sys_step)
+
             # Recalculate optimal block steps periodically
             if self.sys_step % 32 == 0:
                 self.update_time_steps()
-                
+
             self.step_count += 1
-            
-        # Download predicted positions (exactly at current sys_step) to RAM for Pygame
+
+        # Export: ti_pred_pos/vel now contains:
+        #   - corrected (pc, vc) for active particles  (via sync_active_to_pred)
+        #   - Taylor-predicted state for inactive particles
+        # Both represent the best available state at the current global time.
         self.pos = self.ti_pred_pos.to_numpy()
         self.vel = self.ti_pred_vel.to_numpy()
+
+        # Update energy from the exported corrected state.
+        # Use float64 for accuracy; cast once per step batch.
+        try:
+            pos64 = self.pos.astype(np.float64)
+            vel64 = self.vel.astype(np.float64)
+            self.energy = compute_energy(pos64, vel64,
+                                         self.mass.astype(np.float64),
+                                         self.N, self.G, self.eps)
+        except Exception:
+            pass  # energy update is advisory; never break the render loop
+
