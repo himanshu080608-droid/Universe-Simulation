@@ -42,7 +42,7 @@ Usage:
     python3 main.py --N 8000                    # custom particle count
     python3 main.py --mode mpl                  # matplotlib offline renderer
     python3 main.py --mode mpl --save out.mp4   # export video
-    python3 main.py --legacy-leapfrog           # use old 2nd-order Leapfrog (instead of Hermite)
+    python3 main.py --legacy-leapfrog           # use old 2nd-order Leapfrog (instead of AdvancedTaichiEngine)
     
     # Media Generation (saves to output/ directory)
     python3 record_screenshots.py               # generate high-res zoom PNGs
@@ -94,11 +94,11 @@ def parse_args():
     p.add_argument("--theta", type=float, default=0.8,
                    help="Barnes-Hut opening angle (default: 0.6)")
     p.add_argument("--legacy-leapfrog", action="store_true",
-                   help="Use the older 2nd-Order Leapfrog Integrator instead of Hermite")
+                   help="Use the older 2nd-Order Leapfrog Integrator instead of AdvancedTaichiEngine")
     p.add_argument("--taichi", action="store_true",
-                   help="Use Taichi GPU engine (Metal/CUDA) for massive speedups")
+                   help="Use Taichi GPU Hermite engine (Metal/CUDA)")
     p.add_argument("--advanced", action="store_true",
-                   help="Use the Ultimate Engine (Taichi GPU + Ahmad-Cohen Block Time-Steps)")
+                   help="Use the Ultimate Engine (Taichi GPU + Ahmad-Cohen Block Time-Steps) [also the default]")
     p.add_argument("--spf", type=int, default=2,
                    help="Physics steps per display frame (default: 2)")
     p.add_argument("--fps", type=int, default=60,
@@ -237,16 +237,9 @@ def main():
             theta=args.theta, use_bh=True,
             preset=args.preset
         )
-        
+
         # ── 3. JIT warmup ─────────────────────────────────────────────────────────
         engine.warmup()
-    elif args.advanced:
-        from advanced_engine import AdvancedTaichiEngine
-        engine = AdvancedTaichiEngine(
-            pos, vel, mass, types,
-            dt=args.dt, eps=args.eps, G=1.0
-        )
-        print("[Advanced Engine] GPU Block Time-Step initialization complete.", flush=True)
     elif args.taichi:
         from taichi_engine import TaichiEngine
         engine = TaichiEngine(
@@ -256,15 +249,13 @@ def main():
         # Taichi compiles kernels on first call (already done in __init__)
         print("[Taichi Engine] GPU initialization complete.", flush=True)
     else:
-        from hermite_engine import HermiteEngine
-        engine = HermiteEngine(
+        # Default: AdvancedTaichiEngine (selected explicitly via --advanced or by default)
+        from advanced_engine import AdvancedTaichiEngine
+        engine = AdvancedTaichiEngine(
             pos, vel, mass, types,
-            dt=args.dt, eps=args.eps, G=1.0,
-            theta=args.theta, preset=args.preset
+            dt=args.dt, eps=args.eps, G=1.0
         )
-        
-        # ── 3. JIT warmup ─────────────────────────────────────────────────────────
-        engine.warmup()
+        print("[Advanced Engine] GPU Block Time-Step initialization complete.", flush=True)
 
     # ── 4. Launch renderer ────────────────────────────────────────────────────
     if args.mode == "pygame":
