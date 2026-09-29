@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Numba cache
+*.nbi
+*.nbc
+
+# Agent / Tooling
+.agents/
+scratch/
+
+# Logs and Context
+*.log
+total_project_context.txt
+benchmark_*.txt
+deep-research-report.md
+
+# Analysis and Patch
+patch_*.py
+analyze_*.py
+
+# Test Output & Media Artifacts
+output/
+tests/output/
+tests/baselines/*_pre_bloom.png
