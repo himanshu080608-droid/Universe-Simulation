@@ -138,6 +138,14 @@ python3 main.py --N 10000 --trail-decay 0.95
 python3 main.py --preset twin_galaxies --seed random
 ```
 
+### Automated Regression Test Suite
+
+For contributors and developers, run the full test suite (which includes physics, integration, and Pygame visual regressions running headlessly in CI):
+
+```bash
+python3 -m unittest discover tests -v
+```
+
 ### Headless Visual Regression Test Suite
 
 Run the automated visual test suite to generate frame snapshots and verified visual GIFs for macro/micro views of all presets:
