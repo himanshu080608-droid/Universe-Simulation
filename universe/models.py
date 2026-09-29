@@ -25,7 +25,51 @@ class PlummerModel(AstronomicalModel):
         self.is_gas = is_gas
         self.mass_segregation = mass_segregation
         self.omega_rotation = omega_rotation
-        
+
+    def _jeans_sigma1d(self, r):
+        """
+        Closed-form analytic 1-D Jeans velocity dispersion for a softened
+        truncated Kuzmin disk (Phase 6.1 rigorous equilibrium reconstruction).
+
+        Derived from the 2-D isotropic radial Jeans equation:
+            d(Sigma * sigma_R^2)/dR = -Sigma(R) * F_R(R)
+
+        with zero-pressure outer BC at R_max = R(u_hi=0.95), using the
+        exact antiderivative of the Kuzmin-surface-density x point-source-force
+        integrand:
+
+            d/dR Q(R,b) = -R*(b^2-a^2)^2 / ((R^2+a^2)*(R^2+b^2))^{3/2}
+
+        Cluster term: b = a + eps  (Kuzmin disk with softening folded into scale)
+        Central-mass term: b = eps  (exact softened point source)
+        G = 1 (normalised simulation units, matching physics/integrator.py).
+
+        Does NOT consume RNG state.
+        """
+        a     = self.a
+        R_max = a * np.sqrt(1.0 / (1.0 - 0.95)**2 - 1.0)
+
+        def _Q(R, b):
+            return (2.0*R**2 + a**2 + b**2) / np.sqrt((R**2 + a**2) * (R**2 + b**2))
+
+        def _J(R, b):
+            dba2 = b**2 - a**2
+            if abs(dba2) < 1e-10 * (a**2 + 1.0):
+                # Continuous limit when b -> a (exact unsoftened Kuzmin Jeans)
+                return 0.25 * ((R**2 + a**2)**(-2.0) - (R_max**2 + a**2)**(-2.0))
+            return (_Q(R, b) - _Q(R_max, b)) / dba2**2
+
+        b_cluster = a + EPS      # EPS = 1.0, module-level constant matching integrator
+        b_central = EPS
+
+        J_cluster = _J(r, b_cluster)
+        J_central = _J(r, b_central)
+
+        sigma_sq = (r**2 + a**2)**1.5 * (
+            self.M * J_cluster + self.M_central * J_central
+        )
+        return np.sqrt(np.maximum(0.0, sigma_sq))
+
     def generate(self):
         # 2D projection of a Plummer sphere (Kuzmin Disk)
         # To maintain perfect equilibrium in 2D 1/r^2 gravity, the particles 
@@ -48,9 +92,9 @@ class PlummerModel(AstronomicalModel):
         # perfectly balanced according to the Virial theorem.
         # Exact 1D velocity dispersion for Kuzmin disk: sigma^2 = (G * M) / (6 * sqrt(r^2 + a^2))
         
-        M_total_system = self.M + self.M_central
-        # 6.0 denominator balances the 2D kinetic energy with the 3D potential energy
-        sigma_1d = np.sqrt(M_total_system / (6.0 * np.sqrt(r**2 + self.a**2) + 1e-9))
+        # Analytic Jeans dispersion: Phase 6.1 closed-form solution.
+        # Replaces ad-hoc sigma^2=M/(6*sqrt(r^2+a^2)) (was ~30% below equilibrium).
+        sigma_1d = self._jeans_sigma1d(r)
         
         vx = self.rng.normal(0, sigma_1d)
         vy = self.rng.normal(0, sigma_1d)
