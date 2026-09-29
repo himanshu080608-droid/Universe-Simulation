@@ -132,34 +132,43 @@ class NFWModel:
         self.types_dist = types_dist
         
     def generate(self):
-        # M(r) \propto ln(1+cx) - cx/(1+cx) where x = r/R_s
+        from universe.nfw_calibration import get_calibration
+        from scipy.interpolate import interp1d
+        
+        # Softening matched to generator
+        eps = 1.0
+        
+        # 1. Calibrated Radial Mass Distribution
+        R_cdf, cdf = get_calibration(self.R_s, self.C, eps)
+        inv_cdf = interp1d(cdf, R_cdf, kind='linear', fill_value="extrapolate")
+        
+        # 2. Deterministic Mapping
+        # Bounded between 0.5/N and 1.0-0.5/N to avoid edge singularities
+        u = self.rng.uniform(0.5/self.N, 1.0 - 0.5/self.N, self.N)
+        r = inv_cdf(u)
+        
+        # Decorrelate radius from generated angle
+        self.rng.shuffle(r)
+        
+        theta = self.rng.uniform(0, 2 * np.pi, self.N)
+        pos = np.column_stack((r * np.cos(theta), r * np.sin(theta)))
+        
+        # 3. Softened Option B Velocity Target
+        # The velocities must balance the actual softened continuous surrogate
         def nfw_mass_frac(x):
             return np.log(1.0 + x) - x / (1.0 + x)
             
         m_vir = nfw_mass_frac(self.C)
-        
-        u = self.rng.uniform(0, 1, self.N)
-        
-        # Inverse transform sampling via interpolation
-        x_grid = np.logspace(-4, np.log10(self.C), 1000)
-        u_grid = nfw_mass_frac(x_grid) / m_vir
-        x_sampled = np.interp(u, u_grid, x_grid)
-        
-        r = x_sampled * self.R_s
-        theta = self.rng.uniform(0, 2 * np.pi, self.N)
-        pos = np.column_stack((r * np.cos(theta), r * np.sin(theta)))
-        
-        # Velocity dispersion
         M_r = self.M * (nfw_mass_frac(r / self.R_s) / m_vir)
-        v_circ = np.sqrt(M_r / (r + 1e-9))
+        a_targ = M_r * r / (r**2 + eps**2)**1.5
+        v_circ = np.sqrt(a_targ * r)
         
-        # Isotropic velocity dispersion for collisionless DM halo
         sigma = v_circ / np.sqrt(2.0)
         
         vx = self.rng.normal(0, sigma, self.N)
         vy = self.rng.normal(0, sigma, self.N)
         
-        # Escape velocity clamp
+        # 4. Escape Velocity Clamp (keeps particles bound)
         phi_0 = self.M / (m_vir * self.R_s)
         phi_r = - phi_0 * np.log(1.0 + r/self.R_s) / (r/self.R_s + 1e-9)
         v_esc = np.sqrt(np.maximum(0.0, -2.0 * phi_r))
@@ -170,6 +179,8 @@ class NFWModel:
         vy *= clamp
         
         vel = np.column_stack((vx, vy))
+        
+        # 5. Exact Mass Conservation
         masses = np.full(self.N, self.M / self.N)
         types = self.rng.choice(self.types_dist['types'], p=self.types_dist['probs'], size=self.N)
         

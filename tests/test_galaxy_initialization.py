@@ -121,13 +121,46 @@ class TestGalaxyInitialization(unittest.TestCase):
         self.assertTrue(len(pos) > 0)
         self.assertTrue(np.any(types == 0)) # STAR
 
-    def test_7_no_unrelated_model_changes(self):
-        """Test 7: Ensure NFWModel remains unchanged."""
-        g = NFWModel(N=1000, total_mass=100.0, R_s=2.0, C=10.0, rng=np.random.default_rng(42), types_dist={'types': [14], 'probs': [1.0]})
+    def test_7_nfw_stage5_surrogate(self):
+        """Test 7: NFWModel uses validated Stage 5 surrogate calibration."""
+        N = 1000
+        M = 100.0
+        R_s = 10.0
+        C = 10.0
+        eps = 1.0
+        g = NFWModel(N=N, total_mass=M, R_s=R_s, C=C, rng=np.random.default_rng(42), types_dist={'types': [14], 'probs': [1.0]})
         pos, vel, mass, types = g.generate()
-        # NFW Model uses rejection sampling inside a sphere, meaning 3D points mapped to 2D
-        r_2d = np.linalg.norm(pos, axis=1)
-        self.assertTrue(np.max(r_2d) > 0.0)
+        
+        # Generation succeeds and finite
+        self.assertTrue(np.all(np.isfinite(pos)))
+        self.assertTrue(np.all(np.isfinite(vel)))
+        
+        r = np.linalg.norm(pos, axis=1)
+        self.assertTrue(np.all(r > 0.0))
+        
+        # Mass conservation
+        self.assertAlmostEqual(np.sum(mass), M)
+        
+        # Support bound check: should be at most 1.05 * R_s * C
+        R_vir = R_s * C
+        self.assertLessEqual(np.max(r), 1.05 * R_vir + 1e-5)
+        
+        # Deterministic generation check
+        g2 = NFWModel(N=N, total_mass=M, R_s=R_s, C=C, rng=np.random.default_rng(42), types_dist={'types': [14], 'probs': [1.0]})
+        pos2, _, _, _ = g2.generate()
+        np.testing.assert_array_equal(pos, pos2)
+
+    def test_8_nfw_unsupported_calibration(self):
+        """Test 8: NFWModel explicitly rejects uncalibrated R_s, C, eps configurations."""
+        with self.assertRaises(ValueError) as context:
+            # R_s=2.0 is not in the validated calibration table
+            g = NFWModel(N=1000, total_mass=100.0, R_s=2.0, C=10.0, rng=np.random.default_rng(42), types_dist={'types': [14], 'probs': [1.0]})
+            g.generate()
+            
+        msg = str(context.exception)
+        self.assertIn("R_s=2.0", msg)
+        self.assertIn("C=10.0", msg)
+        self.assertIn("eps=1.0", msg)
 
 if __name__ == '__main__':
     unittest.main()
