@@ -247,10 +247,34 @@ class GalacticDisk:
 
         # ── Stellar disk (Spiral Arms) ────────────────────────────────────────
         if self.n_stars > 0:
-            a = self.R * 0.2
-            # Use u > 0.05 to naturally create an inner hole without breaking density profile
-            u = self.rng.uniform(0.05, 0.69, self.n_stars)
-            r = a * np.sqrt(u) / (1.0 - np.sqrt(u) + 1e-9)
+            # R_d is the exponential scale length. We map the old parameter a = self.R * 0.2
+            # directly to R_d to preserve the normalized simulation visual extent.
+            R_d = self.R * 0.2
+            a = R_d # Preserve 'a' for circular velocity backward compatibility
+            
+            # The previous Hernquist-like sampler truncated implicitly.
+            # We explicitly enforce realistic simulation bounds (R_min to prevent
+            # overlap with the SMBH, R_max to respect the user's disk_radius).
+            x_min = (0.05 * self.R) / R_d
+            x_max = self.R / R_d
+            
+            def exp_disk_cdf(x):
+                return 1.0 - (1.0 + x) * np.exp(-x)
+                
+            F0 = exp_disk_cdf(x_min)
+            F1 = exp_disk_cdf(x_max)
+            
+            u_rand = self.rng.uniform(0.0, 1.0, self.n_stars)
+            target_F = F0 + u_rand * (F1 - F0)
+            
+            # Solve 1 - (1+x)e^-x = target_F using Newton-Raphson
+            x = x_min + u_rand * (x_max - x_min)
+            for _ in range(10):
+                fx = 1.0 - (1.0 + x) * np.exp(-x) - target_F
+                dfx = x * np.exp(-x)
+                x = x - fx / dfx
+                
+            r = x * R_d
 
             # Generate Spiral Arms (4 arms gives a fuller, 'milkier' look)
             n_arms = 4

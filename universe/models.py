@@ -192,10 +192,34 @@ class ExponentialDisk(AstronomicalModel):
         self.G = G
         
     def generate(self):
-        # Sample starting from 0.15 to prevent the exponential disk from dumping hundreds 
-        # of stars exactly at r ~ 0, which creates the massive overlapping white bloom blob.
-        u = self.rng.uniform(0.15, 0.99, self.N)
-        r = -self.r_scale * np.log(1.0 - u)
+        # We model a true 2D exponential surface density Sigma(R) ~ exp(-R/R_d).
+        # The correct marginal PDF is p(R) ~ R * exp(-R/R_d).
+        # The old simple exponential CDF 1 - exp(-R/Rd) was equivalent to a 1D rod density.
+        
+        # We explicitly preserve the intended inner/outer spatial bounds from the previous 
+        # uniform parameter bounds (u=0.15 to u=0.99 in the old simple CDF) to prevent 
+        # singularity bloom and unbounded float rendering.
+        # old x_min = -ln(1 - 0.15) = 0.1625, old x_max = -ln(1 - 0.99) = 4.605
+        x_min = 0.1625
+        x_max = 4.605
+        
+        def exp_disk_cdf(x):
+            return 1.0 - (1.0 + x) * np.exp(-x)
+            
+        F0 = exp_disk_cdf(x_min)
+        F1 = exp_disk_cdf(x_max)
+        
+        u_rand = self.rng.uniform(0.0, 1.0, self.N)
+        target_F = F0 + u_rand * (F1 - F0)
+        
+        # Inverse transform sampling via Newton-Raphson
+        x = x_min + u_rand * (x_max - x_min)
+        for _ in range(10):
+            fx = 1.0 - (1.0 + x) * np.exp(-x) - target_F
+            dfx = x * np.exp(-x)
+            x = x - fx / dfx
+            
+        r = x * self.r_scale
         th = self.rng.uniform(0, 2 * np.pi, self.N)
         
         # Spiral Density Wave Perturbation
