@@ -40,6 +40,15 @@ A deterministic, ultra-high-performance 2D N-body gravitational sandbox simulati
 | **Messier 31** | `python3 main.py --preset messier31` | M31 Andromeda Galaxy with central SMBH, logarithmic spiral arm structure, and stellar bulge. |
 | **Chaos** | `python3 main.py --preset chaos` | 5 chaotic galaxy clusters on a collision course producing intricate tidal tails and gravitational slingshots. |
 | **Laplace** | `python3 main.py --preset laplace` | Structured concentric deterministic rings demonstrating phase space symmetry and order under gravity. |
+| **NGC 1052-DF2** | `python3 main.py --preset ngc1052_df2` | **Ultra-Diffuse Galaxy:** A ghostly, dark-matter-free dwarf galaxy. Particle counts are strictly capped (N/5) and distributed across a Virial-balanced Gaussian cloud to accurately reflect its sparse, nearly transparent real-world visual density. |
+| **Castor Sextuple** | `python3 main.py --preset castor_sextuple` | 6-star Hierarchical Resonance System surrounded by a distant, mathematically stable circumbinary asteroid belt. |
+| **HD 98800** | `python3 main.py --preset hd98800_polar` | Quadruple Star system featuring a perpendicular Polar Protoplanetary Disk. |
+| **TRAPPIST-1** | `python3 main.py --preset trappist_1` | 7-Planet Resonant Laplace Chain orbiting a central ultra-cool Red Dwarf. |
+| **Shepherd Moons** | `python3 main.py --preset shepherd_moons` | Saturnian-style ring system where shepherd moons carve distinct dark orbital gaps within the planetary rings. |
+| **WR 104** | `python3 main.py --preset wr104_pinwheel` | The Pinwheel Nebula: A colliding-wind binary producing a continuous, rotating Archimedean spiral of hot dust. |
+| **Omega Centauri** | `python3 main.py --preset omega_centauri` | Massive Core-Collapsed Globular Cluster harboring a central Intermediate-Mass Black Hole (IMBH). |
+| **Pleiades (M45)** | `python3 main.py --preset pleiades_m45` | Open Cluster (The Seven Sisters) featuring luminous young blue stars surrounded by a wispy reflection nebula. |
+| **HL Tauri** | `python3 main.py --preset hl_tauri` | Young protoplanetary dust disk featuring distinct annular gaps carved by unseen forming protoplanets. |
 
 ---
 
@@ -75,7 +84,7 @@ The simulation uses an astrophysically accurate, visually distinct, non-overlapp
 | **Mouse Scroll Wheel** | **Smooth Zoom**: Exponential zoom centered at mouse cursor (or spectated body) |
 | **]** / **[** | Zoom in / Zoom out towards window center |
 | **SPACE** | Pause / Resume physics simulation |
-| **+** / **=** | Increase animation speed multiplier (up to **512x**) |
+| **+** / **=** | Increase animation speed multiplier (up to **16x**) |
 | **-** | Decrease animation speed multiplier (slow motion down to **0.0625x** / **1/16th speed**) |
 | **,** / **.** (or **K** / **L**) | Adjust Motion Trail Length (**Off** to **Super**) |
 | **T** | Clear particle motion trail buffer |
@@ -112,6 +121,15 @@ python3 main.py --preset messier13          # M13 100% Stellar Cluster (Red Gian
 python3 main.py --preset messier31          # M31 Andromeda standalone spiral galaxy
 python3 main.py --preset chaos              # 5 chaotic galaxy clusters on collision course
 python3 main.py --preset laplace            # Structured concentric deterministic rings
+python3 main.py --preset ngc1052_df2        # Dark-Matter-Free Ultra-Diffuse Galaxy
+python3 main.py --preset castor_sextuple    # 6-star Hierarchical Resonance System
+python3 main.py --preset hd98800_polar      # Quadruple Star with Polar Protoplanetary Disk
+python3 main.py --preset trappist_1         # 7-Planet Resonant Laplace Chain around Red Dwarf
+python3 main.py --preset shepherd_moons     # Saturnian Ring Gaps & Shepherd Moons
+python3 main.py --preset wr104_pinwheel     # The Pinwheel Nebula (Colliding Wind Binary)
+python3 main.py --preset omega_centauri     # Core-Collapsed Globular with IMBH
+python3 main.py --preset pleiades_m45       # Pleiades Open Cluster (The Seven Sisters)
+python3 main.py --preset hl_tauri           # Protoplanetary Disk with Annular Gaps
 
 # Custom particle count & physics tuning:
 python3 main.py --preset messier13 --N 8000
@@ -129,6 +147,18 @@ python3 tests/test_visuals.py
 ```
 
 Outputs will be saved in `tests/output/`.
+    
+### High-Resolution Screenshots and GIFs
+    
+You can generate high-resolution screenshots at multiple zoom levels, or record animated GIFs of specific presets. All media is saved to the `output/` directory to keep your workspace clean.
+
+```bash
+# Generate high-resolution Pygame screenshots at various zoom levels (saves to output/)
+python3 record_screenshots.py
+
+# Record animated GIFs of presets (saves to output/)
+python3 record_pygame.py
+```
 
 ### Offline Matplotlib & Video Export
 
@@ -146,7 +176,7 @@ python3 main.py --mode mpl --N 1000 --mpl-steps 5000 --save universe.mp4
 
 ```text
 Options:
-  --preset        {twin_galaxies,solar_system,chaos,laplace,alpha_centauri,milkomeda,cygnus_x1,messier13,messier31}
+  --preset        {twin_galaxies,solar_system,chaos,laplace,alpha_centauri,milkomeda,cygnus_x1,messier13,messier31,ngc1052_df2,castor_sextuple,hd98800_polar,trappist_1,shepherd_moons,wr104_pinwheel,omega_centauri,pleiades_m45,hl_tauri}
                   Initial condition layout (default: twin_galaxies)
   --N INT         Target particle count (default: 5000)
   --seed STR      Random seed for deterministic initialization, or 'random' (default: "42")
@@ -154,7 +184,7 @@ Options:
   --dt FLOAT      Leapfrog integration timestep (default: 0.001)
   --eps FLOAT     Gravitational softening factor (default: 1.0)
   --theta FLOAT   Barnes-Hut opening angle criteria (default: 0.6)
-  --no-bh         Disable Barnes-Hut quadtree and force direct O(N²) calculation
+  --legacy-leapfrog Use the older 2nd-Order Leapfrog Integrator instead of Hermite
   --spf INT       Physics sub-steps per display frame (default: 2)
   --fps INT       Target render frame rate (default: 60)
   --trail-decay   Trail fade persistence [0.0 to 1.0] (default: 0.90)

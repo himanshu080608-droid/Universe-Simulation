@@ -26,7 +26,7 @@ from physics.integrator  import (compute_forces_direct,
 # Constants & defaults
 # ─────────────────────────────────────────────────────────────────────────────
 BH_THRESHOLD    = 600     # switch from direct to Barnes-Hut above this N
-BH_THETA        = 0.6     # opening angle (accuracy vs speed trade-off)
+BH_THETA        = 0.8     # opening angle (accuracy vs speed trade-off)
 DEFAULT_DT      = 0.001   # time step — halved for better close-encounter stability
 DEFAULT_EPS     = 1.00    # softening length — 1.0 prevents fast close encounters
 DEFAULT_G       = 1.0     # gravitational constant (normalized units)
@@ -71,6 +71,9 @@ class SimulationEngine:
         self._node_float  = np.empty((MAX_NODES, 6), dtype=np.float64)
         self._node_int    = np.empty((MAX_NODES, 5), dtype=np.int32)
         self._num_nodes   = 0
+        
+        self._bh_stacks   = np.zeros((self.N, 256), dtype=np.int32)
+        self._forces_buf  = np.zeros((self.N, 2), dtype=np.float64)
 
         print(f"[Engine] N={self.N:,}  dt={dt}  eps={eps}  "
               f"mode={'Barnes-Hut' if self.use_bh else 'Direct O(N²)'}")
@@ -98,7 +101,9 @@ class SimulationEngine:
         xmin, ymin = p_w.min(axis=0) - 1
         xmax, ymax = p_w.max(axis=0) + 1
         nf, ni, nc = _build_tree(p_w, m_w, n_warm, xmin, ymin, xmax, ymax, self._node_float, self._node_int)
-        compute_forces_bh(p_w, m_w, n_warm, self.G, self.eps, self.theta, nf, ni, nc)
+        fw = np.zeros((n_warm, 2), dtype=np.float64)
+        sw = np.zeros((n_warm, 256), dtype=np.int32)
+        compute_forces_bh(p_w, m_w, n_warm, self.G, self.eps, self.theta, nf, ni, nc, fw, sw)
 
         # Compile: energy
         compute_energy(p_w, v_w, m_w, n_warm, self.G, self.eps)
@@ -116,7 +121,8 @@ class SimulationEngine:
             self._rebuild_tree()
             self._acc[:] = compute_forces_bh(
                 self.pos, self.mass, self.N, self.G, self.eps, self.theta,
-                self._node_float, self._node_int, self._num_nodes
+                self._node_float, self._node_int, self._num_nodes,
+                self._forces_buf, self._bh_stacks
             )
         else:
             self._acc[:] = compute_forces_direct(
@@ -159,7 +165,8 @@ class SimulationEngine:
             forces = compute_forces_bh(
                 self.pos, self.mass, self.N,
                 self.G, self.eps, self.theta,
-                self._node_float, self._node_int, self._num_nodes
+                self._node_float, self._node_int, self._num_nodes,
+                self._forces_buf, self._bh_stacks
             )
         else:
             forces = compute_forces_direct(
@@ -233,33 +240,12 @@ class SimulationEngine:
 
     def step(self, n_substeps=1, max_ms=12.0, speed_mult=1.0):
         """
-        Advance simulation with float speed multiplier (supports 0.5x, 0.25x, 0.125x slow motion).
-        Guarantees 30+ FPS even at high speed multipliers (up to 512x).
+        Advance simulation with float speed multiplier.
         """
-        if speed_mult < 1.0:
-            effective_dt = self.dt * float(speed_mult)
-            self._single_leapfrog_step(effective_dt)
-            return
-
-        n_sub = int(round(n_substeps * speed_mult))
-        if n_sub <= 1:
+        n_sub = max(1, int(round(n_substeps * float(speed_mult))))
+        
+        for _ in range(n_sub):
             self._single_leapfrog_step(self.dt)
-            return
-
-        t0 = time.perf_counter()
-        completed = 0
-
-        for i in range(n_sub):
-            self._single_leapfrog_step(self.dt)
-            completed += 1
-
-            # Time budget check (max 12ms per frame to maintain >=30-60 FPS)
-            elapsed_ms = (time.perf_counter() - t0) * 1000.0
-            if elapsed_ms >= max_ms and completed < n_sub:
-                remaining = n_sub - completed
-                dt_boost = self.dt * (1.0 + (remaining / completed))
-                self._single_leapfrog_step(dt_boost)
-                break
 
         # Periodic energy sampling (only for smaller systems — O(N²))
         if self.N <= 1500 and self.step_count % ENERGY_INTERVAL == 0:

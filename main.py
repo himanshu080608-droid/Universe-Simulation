@@ -17,20 +17,36 @@ integration of N gravitating particles from t=0 to t=∞.
 
 Usage:
     python3 main.py                             # default live Pygame mode (twin_galaxies)
-    python3 main.py --preset twin_galaxies      # two colliding spiral galaxies with central SMBHs
+    python3 main.py --preset twin_galaxies      # two colliding spiral galaxies with dark matter halos
     python3 main.py --preset solar_system       # Sun + 8 major planets + asteroid & Oort belt
     python3 main.py --preset alpha_centauri     # Alpha Centauri A/B binary + Proxima & exoplanets
     python3 main.py --preset milkomeda          # Andromeda + Milky Way + M33 triple galactic merger
-    python3 main.py --preset cygnus_x1          # Black hole accretion disk, companion star & polar jets
+    python3 main.py --preset stephans_quintet   # Stephan's Quintet (Compact Galaxy Group)
     python3 main.py --preset messier13          # M13 100% stellar cluster (Red Giants, Pulsars, Blue Stragglers)
     python3 main.py --preset messier31          # M31 Andromeda standalone spiral galaxy
     python3 main.py --preset chaos              # 5 galaxy clusters on collision course
     python3 main.py --preset laplace            # ordered Laplacian concentric rings
+    python3 main.py --preset ngc1052_df2        # Dark-Matter-Free Ultra-Diffuse Galaxy
+    python3 main.py --preset castor_sextuple    # 6-star Hierarchical Resonance System
+    python3 main.py --preset hd98800_polar      # Quadruple Star with Polar Protoplanetary Disk
+    python3 main.py --preset trappist_1         # 7-Planet Resonant Laplace Chain around Red Dwarf
+    python3 main.py --preset gravothermal_catastrophe # Core Collapse of a Uniform Cluster
+    python3 main.py --preset wr104_pinwheel     # The Pinwheel Nebula (Colliding Wind Binary)
+    python3 main.py --preset omega_centauri     # Core-Collapsed Globular with IMBH
+    python3 main.py --preset pleiades_m45       # Pleiades Open Cluster (The Seven Sisters)
+    python3 main.py --preset hirayama_family    # Asteroid Disruption & Keplerian Shear
+    python3 main.py --preset dark_matter_halo_merger # Dark Matter Halo Merger (Violent Relaxation)
+    python3 main.py --preset great_attractor    # The Great Attractor (Cosmic Filaments)
+    
     python3 main.py --seed random               # use a random layout seed (default is 42)
     python3 main.py --N 8000                    # custom particle count
     python3 main.py --mode mpl                  # matplotlib offline renderer
     python3 main.py --mode mpl --save out.mp4   # export video
-    python3 main.py --no-bh                     # disable Barnes-Hut (small N direct sum)
+    python3 main.py --legacy-leapfrog           # use old 2nd-order Leapfrog (instead of Hermite)
+    
+    # Media Generation (saves to output/ directory)
+    python3 record_screenshots.py               # generate high-res zoom PNGs
+    python3 record_pygame.py                    # generate animated GIFs
 
 Controls (Pygame Mode):
     Left Drag          : Pan camera viewport freely
@@ -59,7 +75,10 @@ def parse_args():
         epilog=__doc__
     )
     p.add_argument("--preset", choices=["twin_galaxies", "solar_system", "chaos", "laplace",
-                                         "alpha_centauri", "milkomeda", "cygnus_x1", "messier13", "messier31"],
+                                         "alpha_centauri", "milkomeda", "stephans_quintet", "messier13", "messier31",
+                                         "ngc1052_df2", "castor_sextuple", "hd98800_polar",
+                                         "trappist_1", "gravothermal_catastrophe", "wr104_pinwheel", "omega_centauri",
+                                         "pleiades_m45", "hirayama_family", "dark_matter_halo_merger", "great_attractor"],
                    default="twin_galaxies",
                    help="Initial condition preset layout (default: twin_galaxies)")
     p.add_argument("--N", type=int, default=5000,
@@ -69,13 +88,17 @@ def parse_args():
     p.add_argument("--mode", choices=["pygame", "mpl"], default="pygame",
                    help="Renderer: 'pygame' = live, 'mpl' = offline (default: pygame)")
     p.add_argument("--dt", type=float, default=0.001,
-                   help="Leapfrog time step (default: 0.001)")
+                   help="Integration time step (default: 0.001 for Hermite)")
     p.add_argument("--eps", type=float, default=1.0,
                    help="Gravitational softening (default: 1.0)")
-    p.add_argument("--theta", type=float, default=0.6,
+    p.add_argument("--theta", type=float, default=0.8,
                    help="Barnes-Hut opening angle (default: 0.6)")
-    p.add_argument("--no-bh", action="store_true",
-                   help="Disable Barnes-Hut (O(N²) direct sum — small N only)")
+    p.add_argument("--legacy-leapfrog", action="store_true",
+                   help="Use the older 2nd-Order Leapfrog Integrator instead of Hermite")
+    p.add_argument("--taichi", action="store_true",
+                   help="Use Taichi GPU engine (Metal/CUDA) for massive speedups")
+    p.add_argument("--advanced", action="store_true",
+                   help="Use the Ultimate Engine (Taichi GPU + Ahmad-Cohen Block Time-Steps)")
     p.add_argument("--spf", type=int, default=2,
                    help="Physics steps per display frame (default: 2)")
     p.add_argument("--fps", type=int, default=60,
@@ -102,7 +125,8 @@ def run_pygame(engine, args):
 
     renderer = PygameRenderer(
         width=args.width, height=args.height,
-        trail_decay=args.trail_decay
+        trail_decay=args.trail_decay,
+        preset_name=args.preset
     )
     spf = args.spf
 
@@ -205,17 +229,42 @@ def main():
     print(f"[Main] Generated {N_actual:,} particles.", flush=True)
 
     # ── 2. Build engine ───────────────────────────────────────────────────────
-    from simulation_engine import SimulationEngine
-    use_bh = not args.no_bh
-    engine = SimulationEngine(
-        pos, vel, mass, types,
-        dt=args.dt, eps=args.eps, G=1.0,
-        theta=args.theta, use_bh=use_bh,
-        preset=args.preset
-    )
-
-    # ── 3. JIT warmup ─────────────────────────────────────────────────────────
-    engine.warmup()
+    if args.legacy_leapfrog:
+        from simulation_engine import SimulationEngine
+        engine = SimulationEngine(
+            pos, vel, mass, types,
+            dt=args.dt, eps=args.eps, G=1.0,
+            theta=args.theta, use_bh=True,
+            preset=args.preset
+        )
+        
+        # ── 3. JIT warmup ─────────────────────────────────────────────────────────
+        engine.warmup()
+    elif args.advanced:
+        from advanced_engine import AdvancedTaichiEngine
+        engine = AdvancedTaichiEngine(
+            pos, vel, mass, types,
+            dt=args.dt, eps=args.eps, G=1.0
+        )
+        print("[Advanced Engine] GPU Block Time-Step initialization complete.", flush=True)
+    elif args.taichi:
+        from taichi_engine import TaichiEngine
+        engine = TaichiEngine(
+            pos, vel, mass, types,
+            dt=args.dt, eps=args.eps, G=1.0
+        )
+        # Taichi compiles kernels on first call (already done in __init__)
+        print("[Taichi Engine] GPU initialization complete.", flush=True)
+    else:
+        from hermite_engine import HermiteEngine
+        engine = HermiteEngine(
+            pos, vel, mass, types,
+            dt=args.dt, eps=args.eps, G=1.0,
+            theta=args.theta, preset=args.preset
+        )
+        
+        # ── 3. JIT warmup ─────────────────────────────────────────────────────────
+        engine.warmup()
 
     # ── 4. Launch renderer ────────────────────────────────────────────────────
     if args.mode == "pygame":

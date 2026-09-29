@@ -36,7 +36,7 @@ def _build_tree(pos, mass, N, x_min, y_min, x_max, y_max, node_float, node_int):
     def alloc_node(cx, cy, half):
         idx = node_count[0]
         if idx >= MAX_NODES - 1:
-            return MAX_NODES - 1 # return the last safe slot if we run out
+            return -1 # return -1 when out of memory to drop particles and prevent infinite loop
         node_count[0] += 1
         node_float[idx, 0] = cx
         node_float[idx, 1] = cy
@@ -57,6 +57,8 @@ def _build_tree(pos, mass, N, x_min, y_min, x_max, y_max, node_float, node_int):
     half0 = max(x_max - cx0, y_max - cy0) * 1.001  # slight pad
 
     root = alloc_node(cx0, cy0, half0)
+    if root == -1:
+        return node_float, node_int, 0
 
     def child_quadrant(node_idx, px, py):
         """Returns child slot index (0=sw,1=se,2=nw,3=ne) and new cx,cy,half."""
@@ -75,14 +77,11 @@ def _build_tree(pos, mass, N, x_min, y_min, x_max, y_max, node_float, node_int):
                 q = 3; ncx = cx + h; ncy = cy + h
         return q, ncx, ncy, h
 
-    def insert(node_idx, body_i):
+    def insert(node_idx, body_i, stack):
         px = pos[body_i, 0]
         py = pos[body_i, 1]
         m  = mass[body_i]
 
-        # Iterative insertion to avoid Numba recursion depth limits
-        # Increased to 128 to comfortably handle extreme float64 ratios
-        stack = np.zeros(128, dtype=np.int32)
         sp = 0
         stack[sp] = node_idx
         sp += 1
@@ -90,6 +89,7 @@ def _build_tree(pos, mass, N, x_min, y_min, x_max, y_max, node_float, node_int):
         while sp > 0:
             sp -= 1
             nidx = stack[sp]
+            if nidx == -1: break
 
             existing = node_int[nidx, 4]  # body_idx
 
@@ -108,6 +108,7 @@ def _build_tree(pos, mass, N, x_min, y_min, x_max, y_max, node_float, node_int):
                     eq, ecx, ecy, eh = child_quadrant(nidx, pos[existing, 0], pos[existing, 1])
                     if node_int[nidx, eq] == -1:
                         child_node = alloc_node(ecx, ecy, eh)
+                        if child_node == -1: break
                         node_int[nidx, eq] = child_node
                     child = node_int[nidx, eq]
                     node_int[child, 4] = existing
@@ -124,6 +125,7 @@ def _build_tree(pos, mass, N, x_min, y_min, x_max, y_max, node_float, node_int):
                 q, ncx, ncy, nh = child_quadrant(nidx, px, py)
                 if node_int[nidx, q] == -1:
                     child_node = alloc_node(ncx, ncy, nh)
+                    if child_node == -1: break
                     node_int[nidx, q] = child_node
                 
                 # Prevent stack overflow from duplicate/precision-lost coordinates
@@ -133,24 +135,22 @@ def _build_tree(pos, mass, N, x_min, y_min, x_max, y_max, node_float, node_int):
                 sp += 1
                 stack[sp - 1] = node_int[nidx, q]
 
+    # Pre-allocate stack ONCE for the entire tree build
+    insert_stack = np.empty(128, dtype=np.int32)
     for i in range(N):
-        insert(root, i)
+        insert(root, i, insert_stack)
 
     return node_float, node_int, node_count[0]
 
 
 @njit(cache=True, fastmath=True, parallel=True)
 def compute_forces_bh(pos, mass, N, G, eps, theta,
-                      node_float, node_int, num_nodes):
+                      node_float, node_int, num_nodes, forces, stacks):
     """
     Compute gravitational forces using Barnes-Hut approximation.
     theta = opening angle (0.5–0.9). Smaller = more accurate, slower.
     """
-    forces = np.zeros((N, 2), dtype=np.float64)
     eps2   = eps * eps
-
-    # Preallocate stacks for each thread to avoid allocation inside parallel loop
-    stacks = np.zeros((N, 256), dtype=np.int32)
 
     for i in prange(N):
         px = pos[i, 0]
@@ -184,7 +184,7 @@ def compute_forces_bh(pos, mass, N, G, eps, theta,
             # Leaf with single body
             if body_idx >= 0 and node_int[nidx, 0] == -1:
                 if body_idx != i:
-                    inv_r3 = G * tm * (r2 ** -1.5)
+                    inv_r3 = (G * tm) / (r2 * np.sqrt(r2))
                     fx += inv_r3 * dx
                     fy += inv_r3 * dy
                 continue
@@ -192,7 +192,7 @@ def compute_forces_bh(pos, mass, N, G, eps, theta,
             # Approximate if s/r < theta (far enough away)
             # Check using squared distances to avoid expensive sqrt on failed checks
             if 4.0 * half * half < theta * theta * r2:
-                inv_r3 = G * tm * (r2 ** -1.5)
+                inv_r3 = (G * tm) / (r2 * np.sqrt(r2))
                 fx += inv_r3 * dx
                 fy += inv_r3 * dy
             else:

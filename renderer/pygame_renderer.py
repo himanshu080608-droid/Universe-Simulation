@@ -25,7 +25,7 @@ import pygame.gfxdraw
 from universe.generator import (
     STAR, PLANET, COMET, ROCKY, GAS_GIANT, BLACK_HOLE,
     RED_GIANT, BLUE_STRAGGLER, WHITE_DWARF, NEUTRON_STAR, EMISSION_STAR,
-    RED_DWARF, ASTEROID, PIXEL_COLORS
+    RED_DWARF, ASTEROID, DUST, PIXEL_COLORS
 )
 
 
@@ -47,17 +47,19 @@ _COLOR_LUT = np.array([
     PIXEL_COLORS[EMISSION_STAR],  # 10 — vivid emerald lime green
     PIXEL_COLORS[RED_DWARF],      # 11 — deep crimson red (M-dwarf)
     PIXEL_COLORS[ASTEROID],       # 12 — dusty grey
-], dtype=np.uint8)   # shape (13, 3)
+    PIXEL_COLORS[DUST],           # 13 — ethereal gas/dust tracer
+    (128,  30, 255),              # 14 — Dark Matter debug violet
+], dtype=np.uint8)   # shape (15, 3)
 
-_COLOR_TUPLES = {t: PIXEL_COLORS[t] for t in range(13)}
-
-
+_COLOR_TUPLES = {t: PIXEL_COLORS.get(t, (128, 30, 255)) for t in range(15)}
 
 # Float radii allow for sub-pixel blending (Gaussian soft-dot for tiny particles)
-# Index: 0:STAR, 1:PLANET, 2:COMET, 3:ROCKY, 4:GAS_GIANT, 5:BLACK_HOLE, 6:RED_GIANT, 7:BLUE_STRAGGLER, 8:WHITE_DWARF, 9:NEUTRON_STAR, 10:EMISSION_STAR, 11:RED_DWARF, 12:ASTEROID
-_RADIUS_MAX_LUT = np.array([35.0, 3.0, 1.0, 2.0, 8.0, 40.0, 40.0, 20.0, 6.0, 5.0, 30.0, 15.0, 1.0], dtype=np.float32)
-_RADIUS_MIN_LUT = np.array([2.5, 1.0, 0.5, 1.0, 3.5, 3.0, 3.5, 3.0, 1.5, 2.0, 3.5, 2.0, 0.5], dtype=np.float32)
-
+# Index: 0:STAR, 1:PLANET, 2:COMET, 3:ROCKY, 4:GAS_GIANT, 5:BLACK_HOLE, 6:RED_GIANT, 7:BLUE_STRAGGLER, 8:WHITE_DWARF, 9:NEUTRON_STAR, 10:EMISSION_STAR, 11:RED_DWARF, 12:ASTEROID, 13:DUST, 14:DARK_MATTER
+_RADIUS_MAX_LUT = np.array([12.0, 3.0, 1.0, 4.0, 6.0, 40.0, 15.0, 20.0, 4.0, 3.0, 15.0, 8.0, 1.0, 0.6, 1.0], dtype=np.float32)
+_RADIUS_MIN_LUT = np.array([1.5, 1.0, 0.5, 1.5, 2.0, 3.0, 2.0, 2.5, 1.0, 1.5, 2.0, 1.2, 0.5, 0.3, 0.5], dtype=np.float32)
+_BLOOM_INTENSITY = np.array([0.05, 0.05, 0.05, 0.05, 0.05, 0.0, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.0], dtype=np.float32)
+_BLOOM_SPREAD    = np.array([1.5,  2.0,  2.0,  2.0,  2.0,  0.0, 1.5,  0.8,  1.5,  1.5,  1.5,  1.5,  2.0,  2.0, 0.0], dtype=np.float32)
+_MASS_SCALE_LUT  = np.array([100.0, 1.0, 1.0, 1.0, 100.0, 1.0, 30.0, 20.0, 80.0, 80.0, 80.0, 300.0, 1.0, 1.0, 1.0], dtype=np.float32)
 
 def _type_to_rgb(types):
     """Vectorized type → RGB mapping. Returns (N, 3) uint8 array."""
@@ -124,12 +126,23 @@ class Camera:
         self.offset += np.array([dx, dy])
 
     def reset(self, pos):
-        """Auto-fit all particles into view."""
+        """Auto-fit all particles into view, ignoring extreme outliers."""
         if len(pos) == 0:
             return
-        cx = (pos[:, 0].max() + pos[:, 0].min()) / 2
-        cy = (pos[:, 1].max() + pos[:, 1].min()) / 2
-        span = max(pos[:, 0].max() - pos[:, 0].min(), pos[:, 1].max() - pos[:, 1].min()) + 1e-6
+            
+        # Use percentiles to ignore ejected stars that ruin the zoom
+        x_min, x_max = np.percentile(pos[:, 0], [2, 98])
+        y_min, y_max = np.percentile(pos[:, 1], [2, 98])
+        
+        # Fallback if the simulation collapsed into a single point
+        if x_max - x_min < 1e-3 or y_max - y_min < 1e-3:
+            x_min, x_max = pos[:, 0].min(), pos[:, 0].max()
+            y_min, y_max = pos[:, 1].min(), pos[:, 1].max()
+            
+        cx = (x_max + x_min) / 2
+        cy = (y_max + y_min) / 2
+        span = max(x_max - x_min, y_max - y_min) + 1e-6
+        
         self.zoom   = min(self.w, self.h) * 0.85 / span
         self.target_zoom = self.zoom
         self.offset = np.array([self.w / 2 - cx * self.zoom,
@@ -166,17 +179,34 @@ class ParticleTrailBuffer:
                 self.buffer[x, y, 2] = min(255.0, self.buffer[x, y, 2] + b)
 
     def get_surface_array(self):
-        return self.buffer.astype(np.uint8)
+        # Reinhard Extended Tonemapping for beautiful HDR
+        # Preserves colors much better than simple exponential exposure
+        exposure = 0.005
+        L_white = 3.0 # Brightness level where everything clips to pure white
+        
+        # Scale by exposure
+        mapped = self.buffer * exposure
+        
+        # Extended Reinhard
+        mapped = mapped * (1.0 + (mapped / (L_white * L_white))) / (1.0 + mapped)
+        
+        # Convert to 0-255 range and clip
+        mapped = np.clip(mapped * 255.0, 0, 255)
+        return mapped.astype(np.uint8)
 
 
 from numba import njit
 
 @njit(parallel=True, fastmath=True)
-def _fast_draw_heads(buffer, fx, fy, types, mass, zoom, w, h, colors, max_r_lut, min_r_lut):
+def _fast_draw_heads(buffer, fx, fy, types, mass, zoom, w, h, colors, max_r_lut, min_r_lut, bloom_int_lut, bloom_spr_lut, mass_scale_lut, show_dm):
     N = len(fx)
     # --- PASS 1: Draw everything EXCEPT Black Holes ---
     for i in prange(N):
         t = types[i]
+        
+        if t == 14: # DARK_MATTER (always perfectly invisible, only felt via gravity)
+            continue
+            
         if t == 5:
             continue
             
@@ -194,10 +224,9 @@ def _fast_draw_heads(buffer, fx, fy, types, mass, zoom, w, h, colors, max_r_lut,
             
         r_val = min_r
         
-        if t == 0 or (t >= 6 and t <= 11): # STELLAR
-            r_val += (m_val / 50.0)
-        elif t == 4: # GAS_GIANT
-            r_val += (m_val / 100.0)
+        scale_div = mass_scale_lut[t]
+        if scale_div > 0.0:
+            r_val += (m_val / scale_div)
             
         r_val = min(r_val, max_r)
         
@@ -212,9 +241,9 @@ def _fast_draw_heads(buffer, fx, fy, types, mass, zoom, w, h, colors, max_r_lut,
         
         if r_int <= 0:
             if 0 <= ix < w and 0 <= iy < h:
-                buffer[ix, iy, 0] = min(255.0, buffer[ix, iy, 0] + c_r)
-                buffer[ix, iy, 1] = min(255.0, buffer[ix, iy, 1] + c_g)
-                buffer[ix, iy, 2] = min(255.0, buffer[ix, iy, 2] + c_b)
+                buffer[ix, iy, 0] += c_r
+                buffer[ix, iy, 1] += c_g
+                buffer[ix, iy, 2] += c_b
         else:
             r_sq_draw = r_int * r_int
             for dx in range(-r_int, r_int + 1):
@@ -226,16 +255,15 @@ def _fast_draw_heads(buffer, fx, fy, types, mass, zoom, w, h, colors, max_r_lut,
                         if 0 <= px < w and 0 <= py < h:
                             dist2_norm = dist2_px / r_sq_base if r_sq_base > 0 else 0.0
                             
-                            val = math.exp(-dist2_norm * 2.5)
-                            if is_stellar:
-                                val += 0.45 * math.exp(-dist2_norm * 0.9)
-                            else:
-                                val += 0.15 * math.exp(-dist2_norm * 1.5)
+                            # Steep exponential dropoff creates a sharp, bright core but very little overlapping bloom
+                            factor = math.exp(-dist2_norm * 8.0)
+                            if bloom_int_lut[t] > 0.0:
+                                factor += bloom_int_lut[t] * math.exp(-dist2_norm * bloom_spr_lut[t])
                             
-                            factor = min(val, 1.0)
-                            buffer[px, py, 0] = min(255.0, buffer[px, py, 0] + c_r * factor)
-                            buffer[px, py, 1] = min(255.0, buffer[px, py, 1] + c_g * factor)
-                            buffer[px, py, 2] = min(255.0, buffer[px, py, 2] + c_b * factor)
+                            factor = min(factor, 1.0)
+                            buffer[px, py, 0] += c_r * factor
+                            buffer[px, py, 1] += c_g * factor
+                            buffer[px, py, 2] += c_b * factor
 
     # --- PASS 2: Draw ONLY Black Holes (On Top) ---
     telescope_power = max(0.0, min(1.0, (zoom - 5.0) / 15.0))
@@ -288,27 +316,30 @@ def _fast_draw_heads(buffer, fx, fy, types, mass, zoom, w, h, colors, max_r_lut,
                                 # Photon Ring (Bright White-Gold)
                                 factor = (dist - 0.35) / 0.15
                                 intensity = math.sin(factor * math.pi)
-                                buffer[px, py, 0] = min(255.0, buffer[px, py, 0] + 255.0 * intensity)
-                                buffer[px, py, 1] = min(255.0, buffer[px, py, 1] + 200.0 * intensity)
-                                buffer[px, py, 2] = min(255.0, buffer[px, py, 2] + 150.0 * intensity)
+                                buffer[px, py, 0] += 255.0 * intensity
+                                buffer[px, py, 1] += 200.0 * intensity
+                                buffer[px, py, 2] += 150.0 * intensity
                             else:
                                 # Outer Accretion Disk (Soft Fading Orange-Gold)
                                 factor = 1.0 - ((dist - 0.5) / 1.0) # stretch fade over remaining distance
                                 if factor > 0:
                                     factor = factor * factor
-                                    buffer[px, py, 0] = min(255.0, buffer[px, py, 0] + 200.0 * factor)
-                                    buffer[px, py, 1] = min(255.0, buffer[px, py, 1] + 100.0 * factor)
-                                    buffer[px, py, 2] = min(255.0, buffer[px, py, 2] + 40.0 * factor)
+                                    buffer[px, py, 0] += 200.0 * factor
+                                    buffer[px, py, 1] += 100.0 * factor
+                                    buffer[px, py, 2] += 40.0 * factor
 
 
 @njit(parallel=True, fastmath=True)
-def _fast_splat(buffer, fx, fy, prev_fx, prev_fy, colors, w, h, intensity, draw_lines):
+def _fast_splat(buffer, fx, fy, prev_fx, prev_fy, types, colors, w, h, intensity, draw_lines):
     """
     1-pixel thick, gap-free, native DDA line splatting for trails.
     Draws perfectly thin and sharp trails.
     """
     N = len(fx)
     for i in prange(N):
+        if types[i] == 14: # DARK_MATTER
+            continue
+            
         x1_f = fx[i]
         y1_f = fy[i]
         x0_f = prev_fx[i]
@@ -347,9 +378,9 @@ def _fast_splat(buffer, fx, fy, prev_fx, prev_fy, colors, w, h, intensity, draw_
             iy = int(math.floor(y_f))
 
             if 0 <= ix < w and 0 <= iy < h:
-                buffer[ix, iy, 0] = min(255.0, buffer[ix, iy, 0] + r)
-                buffer[ix, iy, 1] = min(255.0, buffer[ix, iy, 1] + g)
-                buffer[ix, iy, 2] = min(255.0, buffer[ix, iy, 2] + b)
+                buffer[ix, iy, 0] += r
+                buffer[ix, iy, 1] += g
+                buffer[ix, iy, 2] += b
 
 
 # Pixel radii per particle type (Max and Min bounds for zoom scaling).
@@ -485,7 +516,7 @@ class PygameRenderer:
     """
     def __init__(self, width=1600, height=900,
                  trail_decay=0.90,
-                 title="Laplace's Demon — Universe Sandbox"):
+                 title="Laplace's Demon — Universe Sandbox", preset_name=None):
         pygame.init()
         pygame.display.set_caption(title)
         self.w = width
@@ -499,15 +530,66 @@ class PygameRenderer:
         self.camera  = Camera(width, height)
         self.trail_buffer = np.zeros((width, height, 3), dtype=np.float32)
 
-        # Trail size preset index (default: Standard 0.90)
-        self.trail_index = 4
-        self.decay = TRAIL_PRESETS[self.trail_index][0]
+        # Determine initial trail preset index based on requested decay
+        self.trail_index = 4 # Default to standard
+        for i, preset in enumerate(TRAIL_PRESETS):
+            if abs(preset[0] - trail_decay) < 1e-4:
+                self.trail_index = i
+                break
+                
+        self.decay = trail_decay
 
         # Interaction & Spectator Tracking state
         self.paused           = False
         self.speed_mult       = 1.0
         self.tracked_particle = None   # int particle index or None
         self._drag            = False
+        self.show_dark_matter = False
+
+        self.bloom_int = _BLOOM_INTENSITY.copy()
+        self.bloom_spr = _BLOOM_SPREAD.copy()
+        self.mass_scale = _MASS_SCALE_LUT.copy()
+        self.max_r = _RADIUS_MAX_LUT.copy()
+        self.min_r = _RADIUS_MIN_LUT.copy()
+        self._apply_preset_visuals(preset_name)
+
+    def _apply_preset_visuals(self, preset):
+        if not preset:
+            return
+        if preset == "pleiades_m45":
+            self.bloom_int[7] = 0.35 # Extreme blue stragglers
+            self.bloom_spr[7] = 0.5
+            self.bloom_int[0] = 0.15 # Brighter G-stars
+            self.bloom_int[11] = 0.05
+            
+            # Since total mass is small, individual m_val is ~0.4
+            self.mass_scale[7] = 0.05 # 0.4 / 0.05 = 8 pixels bonus
+            self.mass_scale[0] = 0.30  # 0.4 / 0.30 = 1.3 pixels bonus
+            self.mass_scale[11] = 0.80 # 0.4 / 0.80 = 0.5 pixels bonus
+            
+            self.min_r[0] = 2.0  # Force minimum base size for G-stars
+            self.min_r[11] = 1.0 # Force minimum base size for Red Dwarfs
+            self.max_r[0] = 6.0 # Cap G-stars so they don't blow up
+            
+        elif preset == "trappist_1":
+            self.min_r[11] = 6.0 # Force Red Dwarf to be large
+            self.min_r[3]  = 2.5 # Force Rocky planets to be clearly visible
+            self.bloom_int[11] = 0.25 # Give Red Dwarf some glow
+
+        elif preset == "omega_centauri":
+            self.bloom_int[8] = 0.20 
+            self.bloom_int[7] = 0.25
+            
+            # Total mass is huge, individual m_val is ~40
+            self.mass_scale[7] = 5.0
+            self.mass_scale[0] = 15.0
+            self.mass_scale[11] = 40.0
+            self.mass_scale[8] = 10.0 # White dwarfs
+            
+        elif preset == "milkomeda":
+            self.bloom_int[0] = 0.10
+        elif preset == "castor_sextuple":
+            self.bloom_int[0] = 0.30
         self._drag_last       = (0, 0)
 
         # Stats
@@ -528,7 +610,7 @@ class PygameRenderer:
                 elif event.key == pygame.K_u:                  # U → unselect spectator tracking
                     self.tracked_particle = None
                 elif event.key in (pygame.K_PLUS, pygame.K_EQUALS):
-                    self.speed_mult = min(self.speed_mult * 2.0, 512.0)
+                    self.speed_mult = min(self.speed_mult * 2.0, 16.0)
                 elif event.key == pygame.K_MINUS:
                     self.speed_mult = max(self.speed_mult / 2.0, 0.0625)
                 elif event.key in (pygame.K_COMMA, pygame.K_k):   # , or K → decrease trail size
@@ -541,6 +623,8 @@ class PygameRenderer:
                     self.camera.reset(pos)
                     self.tracked_particle = None
                     self.trail_buffer[:] = 0
+                elif event.key == pygame.K_d:
+                    self.show_dark_matter = not self.show_dark_matter
                 elif event.key == pygame.K_t:
                     self.trail_buffer[:] = 0
                 elif event.key == pygame.K_RIGHTBRACKET:   # ] → zoom in
@@ -673,7 +757,7 @@ class PygameRenderer:
         draw_lines = bool(self.decay > 0.0)
 
         # ── Pass 1: 1-Pixel Thick DDA Line Splatting ─────
-        _fast_splat(self.trail_buffer, fx, fy, fx_prev, fy_prev, colors, self.w, self.h, splat_intensity, draw_lines)
+        _fast_splat(self.trail_buffer, fx, fy, fx_prev, fy_prev, types, colors, self.w, self.h, splat_intensity, draw_lines)
 
         # ── Pass 2: Fast Numba Additive Heads ────────────────────────
         # Copy trail buffer to avoid leaving permanent blobs
@@ -681,7 +765,7 @@ class PygameRenderer:
         
         # Optionally pass a dummy array for mass if None to satisfy numba typing
         mass_array = mass if mass is not None else np.zeros(0, dtype=np.float64)
-        _fast_draw_heads(display_buffer, fx, fy, types, mass_array if mass is not None else None, zoom, self.w, self.h, colors, _RADIUS_MAX_LUT, _RADIUS_MIN_LUT)
+        _fast_draw_heads(display_buffer, fx, fy, types, mass_array if mass is not None else None, zoom, self.w, self.h, colors, self.max_r, self.min_r, self.bloom_int, self.bloom_spr, self.mass_scale, self.show_dark_matter)
 
         # Draw Spectator Target Reticle
         if self.tracked_particle is not None and 0 <= self.tracked_particle < len(types):
@@ -730,6 +814,7 @@ class PygameRenderer:
         n_gas       = int(np.sum(types == GAS_GIANT))
         n_planets   = int(np.sum(types == PLANET))
         n_comets    = int(np.sum(types == COMET))
+        n_asteroids = int(np.sum(types == ASTEROID))
 
         total_all_stars = n_stars + n_red_giant + n_blue_strag + n_white_dwarf + n_neutron + n_emission + n_red_dwarf
 
@@ -766,6 +851,7 @@ class PygameRenderer:
         if n_gas > 0: non_stars_parts.append(f"Gas:{n_gas:,}")
         if n_planets > 0: non_stars_parts.append(f"Disk:{n_planets:,}")
         if n_comets > 0: non_stars_parts.append(f"Comet:{n_comets:,}")
+        if n_asteroids > 0: non_stars_parts.append(f"Asteroid:{n_asteroids:,}")
         non_stars_str = ("  " + "  ".join(non_stars_parts)) if len(non_stars_parts) > 0 else ""
 
         # Spectator tracking info
@@ -783,9 +869,14 @@ class PygameRenderer:
             else:
                 paused_hint = "SIMULATION PAUSED — Press SPACE to resume & spectate tracked body"
 
+        universe_time = step * 0.001
+        time_per_sec = spf * self.speed_mult * 0.001 * self.clock.get_fps()
+        
+        dm_str = "  (DM Vis: ON)" if self.show_dark_matter else ""
         lines = [
             ("LAPLACE'S DEMON — UNIVERSE SANDBOX", (180, 120, 255), self.font_lg),
-            (f"Step: {step:,}   SPF: {spf}   FPS: {self.clock.get_fps():.0f}   Speed: {self.speed_mult:g}x", (200, 200, 200), self.font_sm),
+            (f"Step: {step:,}   SPF: {spf}   FPS: {self.clock.get_fps():.0f}   Speed: {self.speed_mult:g}x{dm_str}", (200, 200, 200), self.font_sm),
+            (f"Univ Time: {universe_time:.2f}   Time/sec: {time_per_sec:.3f}/s", (180, 220, 255), self.font_sm),
             (f"Particles: {N:,}{bh_str}  {stars_detail_str}{non_stars_str}", (200, 200, 200), self.font_sm),
             (f"Zoom: {zoom_str}   Trail: {trail_label} ({self.decay:.3f})   Frame: {avg_ms:.1f}ms", (200, 200, 200), self.font_sm),
         ]
@@ -807,7 +898,7 @@ class PygameRenderer:
         # Controls reminder (bottom left)
         controls = [
             "SPACE: pause/resume   Click (when paused): spectate body   U: unselect tracking",
-            "+/-: speed (0.06x-512x)   ,/.: trail size   Scroll/[]: zoom   Drag: pan   R: reset",
+            "+/-: speed (0.06x-16x)   ,/.: trail size   Scroll/[]: zoom   Drag: pan   R: reset",
         ]
         y = self.h - 34
         for c in controls:
