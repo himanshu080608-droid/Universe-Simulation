@@ -133,19 +133,28 @@ class NFWModel:
         
     def generate(self):
         from universe.nfw_calibration import get_calibration
-        from scipy.interpolate import interp1d
         
         # Softening matched to generator
         eps = 1.0
         
         # 1. Calibrated Radial Mass Distribution
         R_cdf, cdf = get_calibration(self.R_s, self.C, eps)
-        inv_cdf = interp1d(cdf, R_cdf, kind='linear', fill_value="extrapolate")
+        
+        # Remove duplicate CDF values, keeping the rightmost radius for each plateau
+        # to ensure zero-mass regions are represented by their outer boundaries.
+        _, unique_indices = np.unique(cdf[::-1], return_index=True)
+        unique_indices = np.sort(len(cdf) - 1 - unique_indices)
+        
+        cdf_clean = cdf[unique_indices]
+        R_clean = R_cdf[unique_indices]
         
         # 2. Deterministic Mapping
         # Bounded between 0.5/N and 1.0-0.5/N to avoid edge singularities
         u = self.rng.uniform(0.5/self.N, 1.0 - 0.5/self.N, self.N)
-        r = inv_cdf(u)
+        
+        # Use np.interp which naturally bounds to [y[0], y[-1]] (no extrapolation).
+        r = np.interp(u, cdf_clean, R_clean)
+        r = np.clip(r, 0.0, R_cdf[-1])
         
         # Decorrelate radius from generated angle
         self.rng.shuffle(r)
