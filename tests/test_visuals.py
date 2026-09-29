@@ -33,6 +33,10 @@ def get_pixel_bounds(arr):
     y_idx, x_idx = np.where(mask)
     return np.min(y_idx), np.max(y_idx), np.min(x_idx), np.max(x_idx)
 
+def count_saturated_pixels(arr):
+    # Count pixels where any channel is 255
+    return np.sum(np.any(arr >= 250, axis=-1))
+
 class TestPygameRendererVisuals(unittest.TestCase):
     
     def setUp(self):
@@ -173,6 +177,85 @@ class TestPygameRendererVisuals(unittest.TestCase):
         mass = np.array([500.0, 500.0], dtype=np.float64)
         r2.render_frame(pos, types, mass=mass)
         self.assertEqual(np.max(pygame.surfarray.array3d(r2.screen)), 0)
+
+    def test_H_multiscale_bloom_halo(self):
+        """Test 1 - bounded halo: Measure glow radius around a single source."""
+        pos = np.array([[0.0, 0.0]], dtype=np.float64)
+        types = np.array([STAR], dtype=np.int32)
+        mass = np.array([500.0], dtype=np.float64)
+        
+        r = self.create_renderer(width=200, height=200, trail_decay=0.0)
+        r.camera.zoom = 5.0
+        r.camera.offset = np.array([100.0, 100.0], dtype=np.float64)
+        
+        r.render_frame(pos, types, mass=mass, step=0, steps_per_frame=1)
+        arr = pygame.surfarray.array3d(r.screen)
+        arr = np.transpose(arr, (1, 0, 2))
+        
+        # Center is at 100, 100
+        intensities = np.mean(arr[100, 100:], axis=1) # slice from center to right
+        
+        # Find where intensity drops to 0 (or very close, say < 2)
+        radius = 0
+        for i, val in enumerate(intensities):
+            if val < 2.0:
+                radius = i
+                break
+                
+        # The bloom should be finite and within the configured design range 
+        # (dual kawase spreads it wide but finite based on level count and image bounds).
+        # We expect a soft glow radius up to 40-80 pixels for a 200px window with 5 levels.
+        self.assertGreater(radius, 5, "Bloom radius is too small, Kawase should spread it")
+        self.assertLess(radius, 95, "Bloom radius hit the boundary of the 200px window without fading")
+
+    def test_I_multiscale_bloom_monotonic(self):
+        """Test 2 - monotonic contribution: Verify smooth spatial falloff without rings."""
+        pos = np.array([[0.0, 0.0]], dtype=np.float64)
+        types = np.array([STAR], dtype=np.int32)
+        mass = np.array([500.0], dtype=np.float64)
+        
+        r = self.create_renderer(width=200, height=200, trail_decay=0.0)
+        r.camera.zoom = 5.0
+        r.camera.offset = np.array([100.0, 100.0], dtype=np.float64)
+        
+        r.render_frame(pos, types, mass=mass, step=0, steps_per_frame=1)
+        arr = pygame.surfarray.array3d(r.screen)
+        arr = np.transpose(arr, (1, 0, 2))
+        
+        intensities = np.mean(arr[100, 100:180], axis=1) # scan outward
+        
+        # Verify it falls off monotonically from the core outwards
+        # (Dual-kawase is generally smooth)
+        for i in range(1, len(intensities)):
+            # allow a tiny float/rounding wiggle room (e.g. 1 pixel intensity)
+            self.assertLessEqual(intensities[i], intensities[i-1] + 1.5, f"Non-monotonic glow found at distance {i}")
+
+    def test_J_multiscale_bloom_saturation(self):
+        """Test 4 - saturation protection: Measure saturated pixels in a dense source."""
+        # Create a dense cluster of 50 stars at the same location to simulate a galactic core
+        pos = np.zeros((50, 2), dtype=np.float64)
+        types = np.zeros(50, dtype=np.int32) # STAR
+        mass = np.full(50, 100.0, dtype=np.float64)
+        
+        r = self.create_renderer(width=200, height=200, trail_decay=0.0)
+        r.camera.zoom = 5.0
+        r.camera.offset = np.array([100.0, 100.0], dtype=np.float64)
+        
+        r.render_frame(pos, types, mass=mass, step=0, steps_per_frame=1)
+        arr = pygame.surfarray.array3d(r.screen)
+        
+        # Find pixels at maximum intensity (>=250 for at least one channel)
+        saturated_pixels = count_saturated_pixels(arr)
+        total_pixels = 200 * 200
+        saturated_percentage = (saturated_pixels / total_pixels) * 100
+        
+        # The core itself will be white/saturated because it's a dense cluster,
+        # but the bloom must not wash out the whole screen.
+        # So we expect saturated_percentage to be > 0 but << 100%
+        self.assertGreater(saturated_percentage, 0.0)
+        # 10% of a 200x200 window is a circle of radius ~35, which is quite large for the core.
+        # The bloom protection should prevent it from exceeding this.
+        self.assertLess(saturated_percentage, 10.0, "Bloom washed out the screen (saturation protection failed)")
 
     def test_G_baseline_castor_sextuple(self):
         preset = "castor_sextuple"

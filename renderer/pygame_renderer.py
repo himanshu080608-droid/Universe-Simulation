@@ -198,7 +198,7 @@ class ParticleTrailBuffer:
 from numba import njit
 
 @njit(parallel=True, fastmath=True)
-def _fast_draw_heads(buffer, fx, fy, types, mass, zoom, w, h, colors, max_r_lut, min_r_lut, bloom_int_lut, bloom_spr_lut, mass_scale_lut, show_dm):
+def _fast_draw_heads(buffer, bloom_buffer, fx, fy, types, mass, zoom, w, h, colors, max_r_lut, min_r_lut, bloom_int_lut, bloom_spr_lut, mass_scale_lut, show_dm):
     N = len(fx)
     # --- PASS 1: Draw everything EXCEPT Black Holes ---
     for i in prange(N):
@@ -244,6 +244,12 @@ def _fast_draw_heads(buffer, fx, fy, types, mass, zoom, w, h, colors, max_r_lut,
                 buffer[ix, iy, 0] += c_r
                 buffer[ix, iy, 1] += c_g
                 buffer[ix, iy, 2] += c_b
+                
+                b_int = bloom_int_lut[t]
+                if b_int > 0.0:
+                    bloom_buffer[ix, iy, 0] += c_r * b_int
+                    bloom_buffer[ix, iy, 1] += c_g * b_int
+                    bloom_buffer[ix, iy, 2] += c_b * b_int
         else:
             r_sq_draw = r_int * r_int
             for dx in range(-r_int, r_int + 1):
@@ -255,11 +261,17 @@ def _fast_draw_heads(buffer, fx, fy, types, mass, zoom, w, h, colors, max_r_lut,
                         if 0 <= px < w and 0 <= py < h:
                             dist2_norm = dist2_px / r_sq_base if r_sq_base > 0 else 0.0
                             
-                            # Steep exponential dropoff creates a sharp, bright core but very little overlapping bloom
+                            b_int = bloom_int_lut[t]
+                            if b_int > 0.0:
+                                # Map old bloom_spr to the injection size for the bloom source.
+                                # This preserves the preset's intent for the initial bright region size.
+                                b_factor = b_int * math.exp(-dist2_norm * bloom_spr_lut[t])
+                                bloom_buffer[px, py, 0] += c_r * b_factor
+                                bloom_buffer[px, py, 1] += c_g * b_factor
+                                bloom_buffer[px, py, 2] += c_b * b_factor
+
+                            # Base scene gets only the sharp core
                             factor = math.exp(-dist2_norm * 8.0)
-                            if bloom_int_lut[t] > 0.0:
-                                factor += bloom_int_lut[t] * math.exp(-dist2_norm * bloom_spr_lut[t])
-                            
                             factor = min(factor, 1.0)
                             buffer[px, py, 0] += c_r * factor
                             buffer[px, py, 1] += c_g * factor
@@ -529,6 +541,7 @@ class PygameRenderer:
 
         self.camera  = Camera(width, height)
         self.trail_buffer = np.zeros((width, height, 3), dtype=np.float32)
+        self.bloom_levels = 5
 
         # Determine initial trail preset index based on requested decay
         self.trail_index = 4 # Default to standard
@@ -762,10 +775,11 @@ class PygameRenderer:
         # ── Pass 2: Fast Numba Additive Heads ────────────────────────
         # Copy trail buffer to avoid leaving permanent blobs
         display_buffer = self.trail_buffer.copy()
+        bloom_buffer = np.zeros_like(display_buffer)
         
         # Optionally pass a dummy array for mass if None to satisfy numba typing
         mass_array = mass if mass is not None else np.zeros(0, dtype=np.float64)
-        _fast_draw_heads(display_buffer, fx, fy, types, mass_array if mass is not None else None, zoom, self.w, self.h, colors, self.max_r, self.min_r, self.bloom_int, self.bloom_spr, self.mass_scale, self.show_dark_matter)
+        _fast_draw_heads(display_buffer, bloom_buffer, fx, fy, types, mass_array, zoom, self.w, self.h, colors, self.max_r, self.min_r, self.bloom_int, self.bloom_spr, self.mass_scale, self.show_dark_matter)
 
         # Draw Spectator Target Reticle
         if self.tracked_particle is not None and 0 <= self.tracked_particle < len(types):
@@ -786,6 +800,40 @@ class PygameRenderer:
         # Push display buffer to Pygame surface
         surf_array = np.clip(display_buffer, 0, 255).astype(np.uint8)
         surf = pygame.surfarray.make_surface(surf_array)
+
+        # ── Pass 3: Multiscale Dual-Kawase Bloom ─────────────────────
+        # Bloom-source clamp: clip the source buffer to prevent unbounded accumulation
+        bloom_array = np.clip(bloom_buffer, 0, 255).astype(np.uint8)
+        bloom_surf = pygame.surfarray.make_surface(bloom_array)
+
+        levels = self.bloom_levels
+        current_surf = bloom_surf
+        downsampled = []
+        
+        # Downsample chain
+        for i in range(levels):
+            cw, ch = current_surf.get_size()
+            nw, nh = max(cw // 2, 2), max(ch // 2, 2)
+            if nw <= 2 or nh <= 2:
+                break
+            current_surf = pygame.transform.smoothscale(current_surf, (nw, nh))
+            downsampled.append(current_surf)
+            
+        # Upsample/Composite chain
+        if downsampled:
+            composite_surf = downsampled[-1].copy()
+            for i in range(len(downsampled) - 2, -1, -1):
+                target_size = downsampled[i].get_size()
+                scaled_up = pygame.transform.smoothscale(composite_surf, target_size)
+                composite_surf = downsampled[i].copy()
+                composite_surf.blit(scaled_up, (0, 0), special_flags=pygame.BLEND_RGB_ADD)
+                
+            final_bloom = pygame.transform.smoothscale(composite_surf, (self.w, self.h))
+            
+            # Scale bloom intensity to prevent overwhelming the scene
+            final_bloom.set_alpha(150)
+            surf.blit(final_bloom, (0, 0), special_flags=pygame.BLEND_RGB_ADD)
+            
         self.screen.blit(surf, (0, 0))
 
         # ── HUD overlay ──────────────────────────────────────────────
