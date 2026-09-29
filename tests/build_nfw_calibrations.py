@@ -2,7 +2,6 @@ import sys
 import os
 import numpy as np
 from scipy.optimize import nnls
-from scipy.integrate import quad
 import warnings
 
 warnings.filterwarnings("ignore")
@@ -26,19 +25,41 @@ def build_radial_grid(N, R_min, R_max, log_weight=0.9):
     return log_weight * log_grid + (1.0 - log_weight) * lin_grid
 
 _kernel_cache = {}
-def compute_kernel(R_eval, R_annulus, eps):
-    key = (len(R_eval), len(R_annulus), R_eval[0], R_eval[-1], R_annulus[-1], eps)
+def compute_kernel_interval(R_eval, R_bounds, eps):
+    key = (len(R_eval), len(R_bounds), R_eval[0], R_eval[-1], R_bounds[-1], eps)
     if key in _kernel_cache:
         return _kernel_cache[key]
         
-    K = np.zeros((len(R_eval), len(R_annulus)))
-    for i, ri in enumerate(R_eval):
-        for j, rj in enumerate(R_annulus):
-            def integrand(theta):
-                denom = (ri**2 + rj**2 - 2*ri*rj*np.cos(theta) + eps**2)**1.5
-                return (ri - rj*np.cos(theta)) / denom
-            val, _ = quad(integrand, 0, 2*np.pi, epsabs=1e-4, epsrel=1e-4)
-            K[i, j] = G * val / (2 * np.pi)
+    deg_r = 60
+    deg_th = 120
+    xr, wr = np.polynomial.legendre.leggauss(deg_r)
+    xth, wth = np.polynomial.legendre.leggauss(deg_th)
+    
+    th_val = np.pi * xth + np.pi
+    w_th_val = np.pi * wth
+    
+    K = np.zeros((len(R_eval), len(R_bounds)-1))
+    for j in range(len(R_bounds)-1):
+        R0 = R_bounds[j]
+        R1 = R_bounds[j+1]
+        dr = R1 - R0
+        if dr == 0:
+            continue
+            
+        r_val = 0.5 * dr * xr + 0.5 * (R1 + R0)
+        w_r_val = 0.5 * dr * wr
+        
+        r_grid, th_grid = np.meshgrid(r_val, th_val)
+        wr_grid, wth_grid = np.meshgrid(w_r_val, w_th_val)
+        
+        r_cos_th = r_grid * np.cos(th_grid)
+        r2 = r_grid**2
+        
+        for i, ri in enumerate(R_eval):
+            denom = (ri**2 + r2 - 2*ri*r_cos_th + eps**2)**1.5
+            f_val = (ri - r_cos_th) / denom
+            val = np.sum(f_val * wr_grid * wth_grid)
+            K[i, j] = (G / (2 * np.pi)) * val / dr
             
     _kernel_cache[key] = K
     return K
@@ -62,57 +83,49 @@ def calibrate_model_A(K, a_targ, M_total, lambda_reg=0.001):
     m = m * (M_total / np.sum(m))
     return m
 
-def build_calibration(R_s, C, eps, ratio=1.05, N_eval=200):
+def build_and_check(R_s, C, eps, N_eval, lambda_reg):
     R_vir = R_s * C
+    ratio = 1.05
     N_ann = int(N_eval * ratio)
     R_min = 0.01 * eps
     
-    M_total = 1.0 # Normalized mass
+    M_total = 1.0
     
     R_eval = build_radial_grid(N_eval, R_min, R_vir, log_weight=0.9)
     R_ann = build_radial_grid(N_ann, R_min, ratio*R_vir, log_weight=0.9)
+    R_bounds = np.insert(R_ann, 0, 0.0)
     
-    K = compute_kernel(R_eval, R_ann, eps)
+    K = compute_kernel_interval(R_eval, R_bounds, eps)
     a_targ = a_target(R_eval, R_s, C, M_total, eps)
     
-    m = calibrate_model_A(K, a_targ, M_total, lambda_reg=0.001)
+    m = calibrate_model_A(K, a_targ, M_total, lambda_reg=lambda_reg)
     
     cdf = np.cumsum(m)
-    # CDF should be exactly normalized to 1.0 for the surrogate
     cdf = cdf / cdf[-1]
     
-    # Prepend 0,0
     R_cdf = np.insert(R_ann, 0, 0.0)
     cdf = np.insert(cdf, 0, 0.0)
     
-    return R_cdf, cdf
-
-def check_calibration(R_s, C, eps, R_cdf, cdf):
-    # Verify force reproduction
-    R_eval = build_radial_grid(200, 0.01*eps, R_s*C, log_weight=0.9)
-    # Re-evaluate
-    M_total = 1.0
-    R_ann = R_cdf[1:]
-    m = np.diff(cdf)
-    K = compute_kernel(R_eval, R_ann, eps)
-    a_surr = K @ m
-    a_targ = a_target(R_eval, R_s, C, M_total, eps)
+    # Check
+    R_eval_check = build_radial_grid(200, 0.01*eps, R_s*C, log_weight=0.9)
+    _, unique_indices = np.unique(cdf[::-1], return_index=True)
+    unique_indices = np.sort(len(cdf) - 1 - unique_indices)
+    cdf_clean = cdf[unique_indices]
+    R_clean = R_cdf[unique_indices]
+    m_clean = np.diff(cdf_clean) * M_total
     
-    mask = R_eval >= eps
-    err_rel = np.abs(a_surr[mask] - a_targ[mask]) / np.maximum(a_targ[mask], 1e-12)
+    K_check = compute_kernel_interval(R_eval_check, R_clean, eps)
+    a_surr = K_check @ m_clean
+    a_targ_check = a_target(R_eval_check, R_s, C, M_total, eps)
+    
+    mask = R_eval_check >= eps
+    err_rel = np.abs(a_surr[mask] - a_targ_check[mask]) / np.maximum(a_targ_check[mask], 1e-12)
     med = np.median(err_rel)
     p95 = np.percentile(err_rel, 95)
     mmax = np.max(err_rel)
     
-    print(f"Calibration R_s={R_s}, C={C}, eps={eps}:")
-    print(f"  Med Err (>= 1 eps): {med*100:.2f}%")
-    print(f"  P95 Err (>= 1 eps): {p95*100:.2f}%")
-    print(f"  Max Err (>= 1 eps): {mmax*100:.2f}%")
-    if med <= 0.10 and p95 <= 0.25 and mmax <= 0.40:
-        print("  PASS")
-    else:
-        print("  FAIL")
-        
+    return med, p95, mmax, R_cdf, cdf
+
 def main():
     calibrations = [
         (10.0, 10.0, 1.0),
@@ -128,9 +141,46 @@ def main():
     
     for R_s, C, eps in calibrations:
         print(f"Building {R_s}, {C}, {eps}...")
-        R_cdf, cdf = build_calibration(R_s, C, eps)
-        check_calibration(R_s, C, eps, R_cdf, cdf)
         
+        best_lambda = 0.0
+        best_N = 200
+        best_score = 1e9
+        best_res = None
+        
+        # Grid search for best params
+        for N_e in [100, 150, 200, 250, 300, 400]:
+            for l_reg in [0.01, 0.1, 1.0, 10.0, 50.0]:
+                med, p95, mmax, R_cdf, cdf = build_and_check(R_s, C, eps, N_e, l_reg)
+                print(f"  N={N_e}, lambda={l_reg}: med={med*100:.2f}%, p95={p95*100:.2f}%, max={mmax*100:.2f}%")
+                
+                # We want to minimize max error as a priority if it is failing
+                score = mmax*100.0 + p95*50.0 + med*10.0
+                
+                # Penalty for not passing gates
+                if mmax > 0.40:
+                    score += 1e5 * (mmax - 0.40)
+                if p95 > 0.25:
+                    score += 1e5 * (p95 - 0.25)
+                if med > 0.10:
+                    score += 1e5 * (med - 0.10)
+                    
+                if score < best_score:
+                    best_score = score
+                    best_lambda = l_reg
+                    best_N = N_e
+                    best_res = (med, p95, mmax, R_cdf, cdf)
+                    
+        med, p95, mmax, R_cdf, cdf = best_res
+        print(f"Selected N={best_N}, lambda={best_lambda}")
+        print(f"  Med Err (>= 1 eps): {med*100:.2f}%")
+        print(f"  P95 Err (>= 1 eps): {p95*100:.2f}%")
+        print(f"  Max Err (>= 1 eps): {mmax*100:.2f}%")
+        
+        if med <= 0.10 and p95 <= 0.25 and mmax <= 0.40:
+            print("  PASS")
+        else:
+            print("  FAIL")
+            
         R_str = ", ".join(f"{x:.6e}" for x in R_cdf)
         C_str = ", ".join(f"{x:.6e}" for x in cdf)
         
