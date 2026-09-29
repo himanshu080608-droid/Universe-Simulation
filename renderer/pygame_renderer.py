@@ -197,11 +197,11 @@ class ParticleTrailBuffer:
 
 from numba import njit
 
-@njit(parallel=True, fastmath=True)
+@njit(parallel=False, fastmath=True)
 def _fast_draw_heads(buffer, bloom_buffer, fx, fy, types, mass, zoom, w, h, colors, max_r_lut, min_r_lut, bloom_int_lut, bloom_spr_lut, mass_scale_lut, show_dm):
     N = len(fx)
     # --- PASS 1: Draw everything EXCEPT Black Holes ---
-    for i in prange(N):
+    for i in range(N):
         t = types[i]
         
         if t == 14: # DARK_MATTER (always perfectly invisible, only felt via gravity)
@@ -246,7 +246,7 @@ def _fast_draw_heads(buffer, bloom_buffer, fx, fy, types, mass, zoom, w, h, colo
                 buffer[ix, iy, 2] += c_b
                 
                 b_int = bloom_int_lut[t]
-                if b_int > 0.0:
+                if is_stellar and b_int > 0.0:
                     bloom_buffer[ix, iy, 0] += c_r * b_int
                     bloom_buffer[ix, iy, 1] += c_g * b_int
                     bloom_buffer[ix, iy, 2] += c_b * b_int
@@ -262,7 +262,7 @@ def _fast_draw_heads(buffer, bloom_buffer, fx, fy, types, mass, zoom, w, h, colo
                             dist2_norm = dist2_px / r_sq_base if r_sq_base > 0 else 0.0
                             
                             b_int = bloom_int_lut[t]
-                            if b_int > 0.0:
+                            if is_stellar and b_int > 0.0:
                                 # Map old bloom_spr to the injection size for the bloom source.
                                 # This preserves the preset's intent for the initial bright region size.
                                 b_factor = b_int * math.exp(-dist2_norm * bloom_spr_lut[t])
@@ -282,7 +282,7 @@ def _fast_draw_heads(buffer, bloom_buffer, fx, fy, types, mass, zoom, w, h, colo
     void_fade = 1.0 - telescope_power
     bh_zoom_factor = max(0.4, min(1.0, zoom / 15.0))
     
-    for i in prange(N):
+    for i in range(N):
         t = types[i]
         if t != 5:
             continue
@@ -801,8 +801,13 @@ class PygameRenderer:
         surf_array = np.clip(display_buffer, 0, 255).astype(np.uint8)
         surf = pygame.surfarray.make_surface(surf_array)
 
-        # ── Pass 3: Multiscale Dual-Kawase Bloom ─────────────────────
-        # Bloom-source clamp: clip the source buffer to prevent unbounded accumulation
+        # ── Pass 3: Dual-Kawase-style Multiscale Bloom ───────────────
+        # Bloom-source soft clip: preserve relative intensity in dense stellar regions
+        # using a soft-knee curve rather than a hard destruction of relative values.
+        threshold = 200.0
+        mask = bloom_buffer > threshold
+        if np.any(mask):
+            bloom_buffer[mask] = threshold + (255.0 - threshold) * (1.0 - np.exp(-(bloom_buffer[mask] - threshold) / 55.0))
         bloom_array = np.clip(bloom_buffer, 0, 255).astype(np.uint8)
         bloom_surf = pygame.surfarray.make_surface(bloom_array)
 

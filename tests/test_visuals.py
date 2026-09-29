@@ -257,9 +257,106 @@ class TestPygameRendererVisuals(unittest.TestCase):
         # The bloom protection should prevent it from exceeding this.
         self.assertLess(saturated_percentage, 10.0, "Bloom washed out the screen (saturation protection failed)")
 
+
+    def test_K_overlapping_source_determinism(self):
+        """Test overlapping-source determinism with a dense cluster."""
+        pos = np.zeros((100, 2), dtype=np.float64) # All in same spot
+        types = np.full(100, STAR, dtype=np.int32)
+        mass = np.full(100, 100.0, dtype=np.float64)
+        
+        r1 = self.create_renderer(width=200, height=200, trail_decay=0.0)
+        r1.camera.zoom = 5.0
+        r1.camera.offset = np.array([100.0, 100.0], dtype=np.float64)
+        r1.render_frame(pos, types, mass=mass, step=0, steps_per_frame=1)
+        arr1 = pygame.surfarray.array3d(r1.screen).copy()
+        
+        r2 = self.create_renderer(width=200, height=200, trail_decay=0.0)
+        r2.camera.zoom = 5.0
+        r2.camera.offset = np.array([100.0, 100.0], dtype=np.float64)
+        r2.render_frame(pos, types, mass=mass, step=0, steps_per_frame=1)
+        arr2 = pygame.surfarray.array3d(r2.screen).copy()
+        
+        np.testing.assert_array_equal(arr1, arr2)
+
+    def test_L_bloom_strength_control(self):
+        """Verify that doubling the configured bloom_int increases the total screen brightness."""
+        pos = np.array([[0.0, 0.0]], dtype=np.float64)
+        types = np.array([STAR], dtype=np.int32)
+        mass = np.array([500.0], dtype=np.float64)
+        
+        # Base renderer
+        r1 = self.create_renderer(width=200, height=200, trail_decay=0.0)
+        r1.camera.zoom = 5.0
+        r1.camera.offset = np.array([100.0, 100.0], dtype=np.float64)
+        # Ensure base bloom is active
+        r1.bloom_int[STAR] = 0.5
+        r1.render_frame(pos, types, mass=mass, step=0, steps_per_frame=1)
+        arr1 = pygame.surfarray.array3d(r1.screen)
+        sum1 = np.sum(arr1)
+        
+        # High bloom renderer
+        r2 = self.create_renderer(width=200, height=200, trail_decay=0.0)
+        r2.camera.zoom = 5.0
+        r2.camera.offset = np.array([100.0, 100.0], dtype=np.float64)
+        r2.bloom_int[STAR] = 1.0 # Double strength
+        r2.render_frame(pos, types, mass=mass, step=0, steps_per_frame=1)
+        arr2 = pygame.surfarray.array3d(r2.screen)
+        sum2 = np.sum(arr2)
+        
+        self.assertGreater(sum2, sum1 * 1.1, "Bloom strength control failed to increase brightness")
+
+    def test_M_non_stellar_bloom_exclusion(self):
+        """Verify that non-stellar objects (like planets) do not bloom even if bloom_int is high."""
+        from universe.generator import ROCKY
+        pos = np.array([[0.0, 0.0]], dtype=np.float64)
+        types = np.array([ROCKY], dtype=np.int32)
+        mass = np.array([500.0], dtype=np.float64)
+        
+        r1 = self.create_renderer(width=200, height=200, trail_decay=0.0)
+        r1.camera.zoom = 5.0
+        r1.camera.offset = np.array([100.0, 100.0], dtype=np.float64)
+        r1.bloom_int[ROCKY] = 10.0 # Extreme bloom intent
+        r1.render_frame(pos, types, mass=mass, step=0, steps_per_frame=1)
+        arr1 = pygame.surfarray.array3d(r1.screen)
+        
+        r2 = self.create_renderer(width=200, height=200, trail_decay=0.0)
+        r2.camera.zoom = 5.0
+        r2.camera.offset = np.array([100.0, 100.0], dtype=np.float64)
+        r2.bloom_int[ROCKY] = 0.0 # No bloom intent
+        r2.render_frame(pos, types, mass=mass, step=0, steps_per_frame=1)
+        arr2 = pygame.surfarray.array3d(r2.screen)
+        
+        # Arrays must be identical because ROCKY is excluded from the bloom pipeline
+        np.testing.assert_array_equal(arr1, arr2)
+
+    def test_N_realistic_saturation_protection(self):
+        """Verify saturation protection using an actual dense galaxy preset."""
+        preset = "omega_centauri"
+        pos, vel, mass, types = build_universe(preset, N_total=2000, seed=42)
+        
+        r = self.create_renderer(width=600, height=600, trail_decay=0.0, preset_name=preset)
+        r.camera.zoom = 10.0
+        r.camera.offset = np.array([300.0, 300.0], dtype=np.float64)
+        
+        r.render_frame(pos, types, mass=mass, step=0, steps_per_frame=1)
+        arr = pygame.surfarray.array3d(r.screen)
+        
+        # Count saturated pixels over the whole frame
+        saturated_pixels = count_saturated_pixels(arr)
+        total_pixels = 600 * 600
+        saturated_percentage = (saturated_pixels / total_pixels) * 100
+        
+        # The center of the galaxy should have high mean brightness
+        center_roi = arr[250:350, 250:350]
+        mean_brightness = np.mean(center_roi)
+        
+        self.assertGreater(mean_brightness, 50.0, "Central region too dim")
+        self.assertLess(saturated_percentage, 15.0, "Bloom blown out across galaxy")
+
+
     def test_G_baseline_castor_sextuple(self):
         preset = "castor_sextuple"
-        baseline_path = os.path.join(os.path.dirname(__file__), f"baselines/{preset}_t0_scene.png")
+        baseline_path = os.path.join(os.path.dirname(__file__), f"baselines/{preset}_t0_scene_post_bloom.png")
         if not os.path.exists(baseline_path):
             self.skipTest(f"Baseline {baseline_path} not found")
             
