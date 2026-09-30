@@ -6,6 +6,8 @@ class SpatialModel:
         raise NotImplementedError
     def enclosed_mass(self, r):
         raise NotImplementedError
+    def radial_force(self, r, G, eps):
+        raise NotImplementedError
 
 class ExponentialDiskSpatial(SpatialModel):
     def __init__(self, r_scale, total_mass, center=(0.0, 0.0)):
@@ -50,6 +52,12 @@ class ExponentialDiskSpatial(SpatialModel):
         F1 = self._exp_disk_cdf(x_max)
         frac = (self._exp_disk_cdf(r / self.r_scale) - F0) / (F1 - F0)
         return self.total_mass * np.clip(frac, 0.0, 1.0)
+        
+    def radial_force(self, r, G, eps):
+        # Controlled approximation: spherical-equivalent enclosed mass force.
+        # This is not an exact 2D disk solution, but an approximation used for initialization.
+        M_enc = self.enclosed_mass(r)
+        return G * M_enc * r / (r**2 + eps**2)**1.5
 
 class PointMassSpatial(SpatialModel):
     def __init__(self, total_mass, center=(0.0, 0.0)):
@@ -63,6 +71,9 @@ class PointMassSpatial(SpatialModel):
         
     def enclosed_mass(self, r):
         return np.full_like(r, self.total_mass)
+        
+    def radial_force(self, r, G, eps):
+        return G * self.total_mass * r / (r**2 + eps**2)**1.5
 
 class NFWSpatial(SpatialModel):
     def __init__(self, R_s, C, total_mass, center=(0.0, 0.0)):
@@ -95,3 +106,8 @@ class NFWSpatial(SpatialModel):
             return np.log(1.0 + x) - x / (1.0 + x)
         m_vir = nfw_mass_frac(self.C)
         return self.total_mass * (nfw_mass_frac(r / self.R_s) / m_vir)
+
+    def radial_force(self, r, G, eps):
+        # Spherical NFW radial force
+        M_enc = self.enclosed_mass(r)
+        return G * M_enc * r / (r**2 + eps**2)**1.5

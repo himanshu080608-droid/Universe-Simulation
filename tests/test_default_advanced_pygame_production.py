@@ -145,14 +145,14 @@ class TestDefaultAdvancedPygameProduction(unittest.TestCase):
         self.assertIsNotNone(renderer1)
         self.assertEqual(type(engine1).__name__, "AdvancedTaichiEngine")
         
-        self.assertEqual(engine1.N, 3788)
+        self.assertEqual(engine1.N, 5000)
         self.assertEqual(engine1.step_count, 10)
         self.assertEqual(engine1.sys_step, 10)
         
-        self.assertEqual(engine1.pos.shape, (3788, 2))
-        self.assertEqual(engine1.vel.shape, (3788, 2))
-        self.assertEqual(engine1.mass.shape, (3788,))
-        self.assertEqual(engine1.types.shape, (3788,))
+        self.assertEqual(engine1.pos.shape, (5000, 2))
+        self.assertEqual(engine1.vel.shape, (5000, 2))
+        self.assertEqual(engine1.mass.shape, (5000,))
+        self.assertEqual(engine1.types.shape, (5000,))
         
         self.assertTrue(np.all(np.isfinite(engine1.pos)))
         self.assertTrue(np.all(np.isfinite(engine1.vel)))

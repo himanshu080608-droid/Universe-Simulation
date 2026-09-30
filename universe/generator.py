@@ -1114,15 +1114,8 @@ def _legacy_build_universe(preset="twin_galaxies", N_total=5000, seed=42):
 from universe.registry import PresetRegistry
 from universe.preset import LegacyAdapterPreset
 
-_legacy_presets = [
-    'twin_galaxies', 'solar_system', 'chaos', 'laplace', 'alpha_centauri', 'milkomeda',
-    'stephans_quintet', 'messier13', 'messier31', 'ngc1052_df2', 'castor_sextuple', 'hd98800_polar',
-    'trappist_1', 'gravothermal_catastrophe', 'wr104_pinwheel', 'omega_centauri', 'pleiades_m45',
-    'hirayama_family', 'dark_matter_halo_merger', 'great_attractor'
-]
-
-for p_name in _legacy_presets:
-    PresetRegistry.register(LegacyAdapterPreset(p_name, f"Legacy preset: {p_name}", _legacy_build_universe))
+from universe.production_presets import register_all
+register_all()
 
 def build_universe(preset="twin_galaxies", N_total=5000, seed=42):
     return PresetRegistry.get(preset).generate(N_total, seed)

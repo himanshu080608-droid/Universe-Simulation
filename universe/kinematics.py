@@ -15,13 +15,12 @@ class DiskKinematics(KinematicModel):
         if N == 0:
             return np.zeros((0, 2))
         
-        M_enc = np.zeros(N)
+        total_radial_force = np.zeros(N)
         for c in all_components:
-            # Add enclosed mass from each component's spatial model
             if c.spatial_model is not None:
-                M_enc += c.spatial_model.enclosed_mass(r)
+                total_radial_force += c.spatial_model.radial_force(r, unit_system.G, unit_system.eps)
                 
-        v_circ = softened_v_circ(unit_system.G, M_enc, r, eps=unit_system.eps)
+        v_circ = np.sqrt(np.maximum(0.0, total_radial_force * r))
         
         angles = np.arctan2(pos[:, 1], pos[:, 0]) + np.pi/2
         vel_x = v_circ * np.cos(angles) + rng.normal(0, v_circ * self.velocity_dispersion)
@@ -38,24 +37,22 @@ class NFWKinematics(KinematicModel):
         if N == 0:
             return np.zeros((0, 2))
             
-        M_enc = np.zeros(N)
+        total_radial_force = np.zeros(N)
+        M_enc_total = np.zeros(N)
         for c in all_components:
             if c.spatial_model is not None:
-                M_enc += c.spatial_model.enclosed_mass(r)
+                total_radial_force += c.spatial_model.radial_force(r, unit_system.G, unit_system.eps)
+                M_enc_total += c.spatial_model.enclosed_mass(r)
                 
         # NFW particles are pressure-supported (dispersion only)
-        # Using the v_circ / sqrt(2) approximation from existing implementation
-        a_targ = unit_system.G * M_enc * r / (r**2 + unit_system.eps**2)**1.5
-        v_circ = np.sqrt(a_targ * r)
+        v_circ = np.sqrt(np.maximum(0.0, total_radial_force * r))
         sigma = v_circ / np.sqrt(2.0)
         
         vx = rng.normal(0, sigma, N)
         vy = rng.normal(0, sigma, N)
         
         # Clamp to escape velocity to keep particles bound
-        # A simple approximation for total M_enc at r_max could be used, but since 
-        # NFW potential is specific to its own mass, we use a heuristic based on total M_enc
-        v_esc = np.sqrt(2.0 * unit_system.G * M_enc / (r + 1e-9))
+        v_esc = np.sqrt(2.0 * unit_system.G * M_enc_total / (r + 1e-9))
         speeds = np.sqrt(vx**2 + vy**2)
         clamp = np.minimum(1.0, 0.95 * v_esc / (speeds + 1e-9))
         

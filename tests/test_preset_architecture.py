@@ -10,7 +10,9 @@ from universe.validation import Diagnostics
 
 class TestPresetArchitecture(unittest.TestCase):
     def setUp(self):
-        # A. Visible stellar component only
+        # Only register if not already there
+        if "test_stellar_only" in PresetRegistry._presets:
+            return
         PresetRegistry.register(Preset(
             name="test_stellar_only",
             description="Visible stellar component only",
@@ -51,7 +53,7 @@ class TestPresetArchitecture(unittest.TestCase):
             name="test_disk_bulge_halo",
             description="Stellar disk + bulge + dark-matter halo",
             components=[
-                Component("bulge", 0.1, 200.0, {'types': [BLACK_HOLE], 'probs': [1.0]}, visible=True,
+                Component("bulge", 0.1, 200.0, {'types': [STAR], 'probs': [1.0]}, visible=True,
                           spatial_model=PointMassSpatial(200.0),
                           kinematic_model=PointMassKinematics()),
                 Component("stars", 0.4, 1000.0, {'types': [STAR], 'probs': [1.0]}, visible=True,
@@ -92,9 +94,18 @@ class TestPresetArchitecture(unittest.TestCase):
     def test_d_disk_bulge_halo(self):
         pos, vel, mass, types = build_universe("test_disk_bulge_halo", 1000, 42)
         self.assertEqual(len(pos), 1000)
-        self.assertEqual(np.sum(types == BLACK_HOLE), 100)
-        self.assertEqual(np.sum(types == STAR), 400)
+        self.assertEqual(np.sum(types == BLACK_HOLE), 0)
+        self.assertEqual(np.sum(types == STAR), 500)
         self.assertEqual(np.sum(types == DARK_MATTER), 500)
+        
+        # Test A3 Component Identity
+        preset = PresetRegistry.get("test_disk_bulge_halo")
+        slices = preset._last_slices
+        self.assertEqual(slices['bulge'], (0, 100))
+        self.assertEqual(slices['stars'], (100, 500))
+        self.assertEqual(slices['halo'], (500, 1000))
+        # Both bulge and stars could technically use the same type without losing identity
+        # The prompt says "disk and bulge sharing STAR type". I will make the bulge use STAR in the test.
 
     def test_e_legacy_preset(self):
         pos, vel, mass, types = build_universe("twin_galaxies", 1000, 42)
@@ -108,3 +119,17 @@ class TestPresetArchitecture(unittest.TestCase):
         p2, v2, m2, t2 = build_universe("test_disk_halo", 100, 42)
         np.testing.assert_array_equal(p1, p2)
         np.testing.assert_array_equal(v1, v2)
+
+    def test_unit_system_conversions(self):
+        units = UnitSystem(L0=2.0, M0=3.0, T0=4.0)
+        # V0 = L0/T0 = 0.5
+        
+        # Round trips
+        self.assertAlmostEqual(units.length_to_sim(10.0), 5.0)
+        self.assertAlmostEqual(units.length_to_physical(5.0), 10.0)
+        
+        self.assertAlmostEqual(units.mass_to_sim(15.0), 5.0)
+        self.assertAlmostEqual(units.mass_to_physical(5.0), 15.0)
+        
+        self.assertAlmostEqual(units.velocity_to_sim(2.0), 4.0)
+        self.assertAlmostEqual(units.velocity_to_physical(4.0), 2.0)

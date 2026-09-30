@@ -235,11 +235,15 @@ def main():
     print(f"[Main] Generated {N_actual:,} particles.", flush=True)
 
     # ── 2. Build engine ───────────────────────────────────────────────────────
+    preset_def = PresetRegistry.get(args.preset)
+    G_sim = preset_def.unit_system.G
+    eps_sim = args.eps if args.eps != 1.0 else preset_def.unit_system.eps
+
     if args.legacy_leapfrog:
         from simulation_engine import SimulationEngine
         engine = SimulationEngine(
             pos, vel, mass, types,
-            dt=args.dt, eps=args.eps, G=1.0,
+            dt=args.dt, eps=eps_sim, G=G_sim,
             theta=args.theta, use_bh=True,
             preset=args.preset
         )
@@ -250,7 +254,7 @@ def main():
         from taichi_engine import TaichiEngine
         engine = TaichiEngine(
             pos, vel, mass, types,
-            dt=args.dt, eps=args.eps, G=1.0
+            dt=args.dt, eps=eps_sim, G=G_sim
         )
         # Taichi compiles kernels on first call (already done in __init__)
         print("[Taichi Engine] GPU initialization complete.", flush=True)
@@ -259,7 +263,7 @@ def main():
         from advanced_engine import AdvancedTaichiEngine
         engine = AdvancedTaichiEngine(
             pos, vel, mass, types,
-            dt=args.dt, eps=args.eps, G=1.0
+            dt=args.dt, eps=eps_sim, G=G_sim
         )
         print("[Advanced Engine] GPU Block Time-Step initialization complete.", flush=True)
 
