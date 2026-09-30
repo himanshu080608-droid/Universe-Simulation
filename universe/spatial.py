@@ -2,6 +2,7 @@ import numpy as np
 from universe.generator import softened_v_circ
 
 class SpatialModel:
+    gravity_classification = "unknown"
     def sample_positions(self, N, rng):
         raise NotImplementedError
     def enclosed_mass(self, r):
@@ -10,6 +11,7 @@ class SpatialModel:
         raise NotImplementedError
 
 class ExponentialDiskSpatial(SpatialModel):
+    gravity_classification = "spherical_approximation"
     def __init__(self, r_scale, total_mass, center=(0.0, 0.0)):
         self.r_scale = r_scale
         self.total_mass = total_mass
@@ -60,6 +62,7 @@ class ExponentialDiskSpatial(SpatialModel):
         return G * M_enc * r / (r**2 + eps**2)**1.5
 
 class PointMassSpatial(SpatialModel):
+    gravity_classification = "exact_point_mass"
     def __init__(self, total_mass, center=(0.0, 0.0)):
         self.total_mass = total_mass
         self.center = np.array(center, dtype=np.float64)
@@ -76,6 +79,7 @@ class PointMassSpatial(SpatialModel):
         return G * self.total_mass * r / (r**2 + eps**2)**1.5
 
 class NFWSpatial(SpatialModel):
+    gravity_classification = "exact_spherical"
     def __init__(self, R_s, C, total_mass, center=(0.0, 0.0)):
         self.R_s = R_s
         self.C = C

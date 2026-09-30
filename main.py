@@ -67,6 +67,10 @@ import sys
 import os
 import numpy as np
 from universe.registry import PresetRegistry
+from universe.production_presets import register_all
+
+# Populate registry before argparse uses it
+register_all()
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Argument parsing

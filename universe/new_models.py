@@ -3,6 +3,7 @@ from universe.spatial import SpatialModel
 from universe.kinematics import KinematicModel
 
 class PlummerSpatial(SpatialModel):
+    gravity_classification = "exact_spherical"
     def __init__(self, a, total_mass, center=(0.0, 0.0)):
         self.a = float(a)
         self.total_mass = float(total_mass)
@@ -24,6 +25,7 @@ class PlummerSpatial(SpatialModel):
         return G * M_enc * r / (r**2 + eps**2)**1.5
 
 class IsotropicKinematics(KinematicModel):
+    kinematic_classification = "heuristic_isotropic"
     def __init__(self, drift=(0.0, 0.0)):
         self.drift = np.array(drift, dtype=np.float64)
         

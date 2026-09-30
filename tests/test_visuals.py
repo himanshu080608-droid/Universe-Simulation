@@ -45,6 +45,11 @@ class TestPygameRendererVisuals(unittest.TestCase):
         def create_renderer(*args, **kwargs):
             if 'preset_name' not in kwargs:
                 kwargs['preset_name'] = "twin_galaxies"
+            from universe.preset import PresetRegistry
+            p = PresetRegistry.get(kwargs['preset_name'])
+            if 'render_semantics' not in kwargs and p:
+                kwargs['render_semantics'] = p.get_render_semantics()
+                
             r = PygameRenderer(*args, **kwargs)
             # Patch _draw_hud to no-op
             self._original_draw_hud = r._draw_hud

@@ -569,45 +569,14 @@ class PygameRenderer:
         self.mass_scale = _MASS_SCALE_LUT.copy()
         self.max_r = _RADIUS_MAX_LUT.copy()
         self.min_r = _RADIUS_MIN_LUT.copy()
-        self._apply_preset_visuals(preset_name)
+        # Apply render semantics metadata if provided
+        if self.render_semantics:
+            for k, v in self.render_semantics.get('bloom_int', {}).items(): self.bloom_int[k] = v
+            for k, v in self.render_semantics.get('bloom_spr', {}).items(): self.bloom_spr[k] = v
+            for k, v in self.render_semantics.get('mass_scale', {}).items(): self.mass_scale[k] = v
+            for k, v in self.render_semantics.get('min_r', {}).items(): self.min_r[k] = v
+            for k, v in self.render_semantics.get('max_r', {}).items(): self.max_r[k] = v
 
-    def _apply_preset_visuals(self, preset):
-        if not preset:
-            return
-        if preset == "pleiades_m45":
-            self.bloom_int[7] = 0.35 # Extreme blue stragglers
-            self.bloom_spr[7] = 0.5
-            self.bloom_int[0] = 0.15 # Brighter G-stars
-            self.bloom_int[11] = 0.05
-            
-            # Since total mass is small, individual m_val is ~0.4
-            self.mass_scale[7] = 0.05 # 0.4 / 0.05 = 8 pixels bonus
-            self.mass_scale[0] = 0.30  # 0.4 / 0.30 = 1.3 pixels bonus
-            self.mass_scale[11] = 0.80 # 0.4 / 0.80 = 0.5 pixels bonus
-            
-            self.min_r[0] = 2.0  # Force minimum base size for G-stars
-            self.min_r[11] = 1.0 # Force minimum base size for Red Dwarfs
-            self.max_r[0] = 6.0 # Cap G-stars so they don't blow up
-            
-        elif preset == "trappist_1":
-            self.min_r[11] = 6.0 # Force Red Dwarf to be large
-            self.min_r[3]  = 2.5 # Force Rocky planets to be clearly visible
-            self.bloom_int[11] = 0.25 # Give Red Dwarf some glow
-
-        elif preset == "omega_centauri":
-            self.bloom_int[8] = 0.20 
-            self.bloom_int[7] = 0.25
-            
-            # Total mass is huge, individual m_val is ~40
-            self.mass_scale[7] = 5.0
-            self.mass_scale[0] = 15.0
-            self.mass_scale[11] = 40.0
-            self.mass_scale[8] = 10.0 # White dwarfs
-            
-        elif preset == "milkomeda":
-            self.bloom_int[0] = 0.10
-        elif preset == "castor_sextuple":
-            self.bloom_int[0] = 0.30
         self._drag_last       = (0, 0)
 
         # Stats

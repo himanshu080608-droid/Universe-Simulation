@@ -18,7 +18,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from universe.generator import softened_v_circ, OrbitalPlanetBelt, build_universe
+from universe.generator import softened_v_circ, build_universe
 
 G   = 1.0
 EPS = 1.0
@@ -55,38 +55,6 @@ class TestSoftenedVCircFormula(unittest.TestCase):
             res = _residual(v, r, M_enc)
             self.assertLess(res, tol,
                 msg=f"r={r}: residual={res:.3e} >= {tol:.3e}")
-
-
-class TestOrbitalPlanetBelt(unittest.TestCase):
-    """OrbitalPlanetBelt uses softened_v_circ → residual < 1e-10 before noise."""
-
-    def test_residual_before_noise(self):
-        """Check that base v (before ±2% perturbation) satisfies residual < 1e-10."""
-        rng    = np.random.default_rng(42)
-        M_enc  = 1000.0
-        r_min, r_max = 3.0, 6.5
-        r_vals = np.linspace(r_min, r_max, 20)
-        tol    = 1e-10
-
-        for r in r_vals:
-            v   = softened_v_circ(G, M_enc, r)
-            res = _residual(v, r, M_enc)
-            self.assertLess(res, tol,
-                msg=f"OrbitalPlanetBelt r={r:.2f}: residual={res:.3e} >= {tol:.3e}")
-
-    def test_generate_deterministic(self):
-        """generate() is deterministic for fixed seed."""
-        def make():
-            rng = np.random.default_rng(7)
-            belt = OrbitalPlanetBelt(
-                num_planets=50, r_min=3.0, r_max=6.5,
-                planet_mass=1.0, central_mass=1000.0, G=G, rng=rng)
-            return belt.generate()
-
-        p1, v1, m1, t1 = make()
-        p2, v2, m2, t2 = make()
-        np.testing.assert_array_equal(p1, p2)
-        np.testing.assert_array_equal(v1, v2)
 
 
 class TestAlphaCentauriBinary(unittest.TestCase):

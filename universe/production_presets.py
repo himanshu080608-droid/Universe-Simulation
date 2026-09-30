@@ -90,7 +90,8 @@ def register_all():
                       spatial_model=ExponentialDiskSpatial(4.0, 1500.0, center=(30, 0)), kinematic_model=DiskKinematics()),
             Component("m31_halo", 0.4, 7500.0, {'types': [DARK_MATTER], 'probs': [1.0]}, visible=False,
                       spatial_model=NFWSpatial(15.0, 10.0, 7500.0, center=(30, 0)), kinematic_model=NFWKinematics()),
-        ]
+        ],
+        visual_metadata={'bloom_int': {STAR: 0.10}}
     ))
 
     # 7. stephans_quintet
@@ -139,7 +140,8 @@ def register_all():
         components=[
             Component("stars", 1.0, 600.0, {'types': [STAR], 'probs': [1.0]}, visible=True,
                       spatial_model=ExponentialDiskSpatial(10.0, 600.0), kinematic_model=DiskKinematics())
-        ]
+        ],
+        visual_metadata={'bloom_int': {STAR: 0.30}}
     ))
 
     # 12. hd98800_polar
@@ -161,7 +163,11 @@ def register_all():
                       spatial_model=PointMassSpatial(1000.0), kinematic_model=PointMassKinematics()),
             Component("planets", 0.9, 10.0, {'types': [PLANET], 'probs': [1.0]}, visible=True,
                       spatial_model=ExponentialDiskSpatial(10.0, 10.0), kinematic_model=DiskKinematics(velocity_dispersion=0.0))
-        ]
+        ],
+        visual_metadata={
+            'min_r': {11: 6.0, 3: 2.5},
+            'bloom_int': {11: 0.25}
+        }
     ))
 
     # 14. gravothermal_catastrophe
@@ -192,7 +198,11 @@ def register_all():
                       spatial_model=PointMassSpatial(1000.0), kinematic_model=PointMassKinematics()),
             Component("stars", 0.99, 10000.0, {'types': [STAR], 'probs': [1.0]}, visible=True,
                       spatial_model=PlummerSpatial(1.0, 10000.0), kinematic_model=IsotropicKinematics())
-        ]
+        ],
+        visual_metadata={
+            'bloom_int': {8: 0.20, 7: 0.25},
+            'mass_scale': {7: 5.0, 0: 15.0, 11: 40.0, 8: 10.0}
+        }
     ))
 
     # 17. pleiades_m45
@@ -201,7 +211,14 @@ def register_all():
         components=[
             Component("stars", 1.0, 500.0, {'types': [STAR], 'probs': [1.0]}, visible=True,
                       spatial_model=PlummerSpatial(10.0, 500.0), kinematic_model=IsotropicKinematics())
-        ]
+        ],
+        visual_metadata={
+            'bloom_int': {7: 0.35, 0: 0.15, 11: 0.05},
+            'bloom_spr': {7: 0.5},
+            'mass_scale': {7: 0.05, 0: 0.30, 11: 0.80},
+            'min_r': {0: 2.0, 11: 1.0},
+            'max_r': {0: 6.0}
+        }
     ))
 
     # 18. hirayama_family

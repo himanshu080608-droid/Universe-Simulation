@@ -2,10 +2,12 @@ import numpy as np
 from universe.generator import softened_v_circ
 
 class KinematicModel:
+    kinematic_classification = "unknown"
     def solve(self, pos, r, all_components, unit_system, rng):
         raise NotImplementedError
 
 class DiskKinematics(KinematicModel):
+    kinematic_classification = "heuristic_circular"
     def __init__(self, drift=(0.0, 0.0), velocity_dispersion=0.05):
         self.drift = np.array(drift, dtype=np.float64)
         self.velocity_dispersion = velocity_dispersion
@@ -29,6 +31,7 @@ class DiskKinematics(KinematicModel):
         return vel
 
 class NFWKinematics(KinematicModel):
+    kinematic_classification = "heuristic_isotropic"
     def __init__(self, drift=(0.0, 0.0)):
         self.drift = np.array(drift, dtype=np.float64)
         
@@ -62,6 +65,7 @@ class NFWKinematics(KinematicModel):
         return np.column_stack((vx, vy)) + self.drift
 
 class PointMassKinematics(KinematicModel):
+    kinematic_classification = "exact_drift"
     def __init__(self, drift=(0.0, 0.0)):
         self.drift = np.array(drift, dtype=np.float64)
         
