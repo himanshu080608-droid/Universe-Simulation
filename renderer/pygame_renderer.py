@@ -3,14 +3,13 @@ Pygame-based real-time renderer for the universe simulation.
 
 Features:
   - GPU-accelerated pixel blitting via pygame.surfarray
-  - Color-coded particle types:
-      STAR=solar-gold, PLANET=electric-cyan, COMET=pale-mint,
-      ROCKY=terracotta-copper, GAS_GIANT=neon-magenta
-  - Size hierarchy: comet (1px) <= planet (1px) < rocky planet (1-2px) < gas giant (2-4px) < star (3-6px) < BH (6-12px)
-  - Particle trails using additive blending (motion blur)
-  - Mouse drag pan, scroll wheel zoom
+  - Multi-pass rendering with sub-pixel dot drawing and additive trails
+  - Dual-Kawase bloom post-processing for stellar glare
+  - Telescope resolution mechanic for zooming into Black Hole event horizons
+  - Color-coded and hierarchically-sized particle types (15 archetypes)
+  - Mouse drag pan, scroll wheel smooth zoom, click-to-spectate targeting
   - Keyboard controls: SPACE=pause, +/-=speed, R=reset view,
-                        [/]=zoom, T=clear trails, ESC=quit
+                        ,/.=trails, T=clear trails, ESC=quit
   - HUD overlay: frame time, particle count, zoom, energy drift
 """
 
@@ -31,7 +30,7 @@ from universe.generator import (
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Color table: type → (R, G, B)  pre-loaded as a lookup array for speed
-# Index order MUST match type integer values (0..10)
+# Index order MUST match type integer values (0..14)
 # ─────────────────────────────────────────────────────────────────────────────
 _COLOR_LUT = np.array([
     PIXEL_COLORS[STAR],           # 0 — warm yellow-gold

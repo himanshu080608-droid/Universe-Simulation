@@ -2,7 +2,7 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║          LAPLACE'S DEMON — UNIVERSE SANDBOX SIMULATION                     ║
-║          N-Body Gravity · Barnes-Hut O(N log N) · Leapfrog KDK             ║
+║          N-Body Gravity · Taichi GPU Hermite · Ahmad-Cohen Block Steps     ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 Laplace's Demon is a thought experiment by Pierre-Simon Laplace (1814):
@@ -16,7 +16,7 @@ This simulation IS that intellect — a deterministic, closed-form numerical
 integration of N gravitating particles from t=0 to t=∞.
 
 Usage:
-    python3 main.py                             # default live Pygame mode (twin_galaxies)
+    python3 main.py                             # default live Pygame mode (AdvancedTaichiEngine, twin_galaxies)
     python3 main.py --preset twin_galaxies      # two colliding spiral galaxies with dark matter halos
     python3 main.py --preset solar_system       # Sun + 8 major planets + asteroid & Oort belt
     python3 main.py --preset alpha_centauri     # Alpha Centauri A/B binary + Proxima & exoplanets
@@ -40,9 +40,11 @@ Usage:
     
     python3 main.py --seed random               # use a random layout seed (default is 42)
     python3 main.py --N 8000                    # custom particle count
-    python3 main.py --mode mpl                  # matplotlib offline renderer
+    python3 main.py --mode mpl                  # matplotlib offline renderer (legacy engine only)
     python3 main.py --mode mpl --save out.mp4   # export video
-    python3 main.py --legacy-leapfrog           # use old 2nd-order Leapfrog (instead of AdvancedTaichiEngine)
+    python3 main.py --advanced                  # Use AdvancedTaichiEngine (default)
+    python3 main.py --taichi                    # Use fixed-step TaichiEngine
+    python3 main.py --legacy-leapfrog           # Use older Barnes-Hut SimulationEngine
     
     # Media Generation (saves to output/ directory)
     python3 record_screenshots.py               # generate high-res zoom PNGs
@@ -92,7 +94,7 @@ def parse_args():
     p.add_argument("--eps", type=float, default=1.0,
                    help="Gravitational softening (default: 1.0)")
     p.add_argument("--theta", type=float, default=0.8,
-                   help="Barnes-Hut opening angle (default: 0.6)")
+                   help="Barnes-Hut opening angle (default: 0.8)")
     p.add_argument("--legacy-leapfrog", action="store_true",
                    help="Use the older 2nd-Order Leapfrog Integrator instead of AdvancedTaichiEngine")
     p.add_argument("--taichi", action="store_true",
@@ -112,8 +114,10 @@ def parse_args():
                    help="Record every N steps for mpl (default: 5)")
     p.add_argument("--save", type=str, default=None,
                    help="If set, save mpl animation to this file (e.g. out.mp4)")
-    p.add_argument("--width",  type=int, default=1600)
-    p.add_argument("--height", type=int, default=900)
+    p.add_argument("--width",  type=int, default=1600,
+                   help="Display width (default: 1600)")
+    p.add_argument("--height", type=int, default=900,
+                   help="Display height (default: 900)")
     return p.parse_args()
 
 

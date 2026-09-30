@@ -1,5 +1,5 @@
 """
-SimulationEngine — owns the physics state and drives the time loop.
+Legacy SimulationEngine — owns the physics state and drives the time loop using Barnes-Hut.
 
 Laplace's Demon philosophy:
   The universe is a deterministic machine. Given exact knowledge of every
