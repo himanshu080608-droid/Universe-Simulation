@@ -9,7 +9,6 @@ import os
 import time
 import unittest
 import numpy as np
-import inspect
 
 os.environ["SDL_VIDEODRIVER"] = "dummy"
 
@@ -53,17 +52,6 @@ class HeadlessTestRenderer(RealPygameRenderer):
         self.frames += 1
         render_frame_calls += 1
         
-        if captured_engine is None:
-            # Safely capture the engine from run_pygame locals
-            frame = inspect.currentframe()
-            while frame:
-                if 'engine' in frame.f_locals:
-                    obj = frame.f_locals['engine']
-                    if hasattr(obj, 'step_count'):
-                        captured_engine = obj
-                        break
-                frame = frame.f_back
-                
         # Capture renderer buffer stats for this frame
         if hasattr(self, 'trail_buffer'):
             captured_trail_buffers.append(self.trail_buffer.copy())
@@ -112,6 +100,9 @@ class TestDefaultAdvancedPygameProduction(unittest.TestCase):
         original_run_pygame = main.run_pygame
         
         def run_pygame_wrapper(engine, args):
+            global captured_engine
+            captured_engine = engine
+            
             original_step = engine.step
             def timed_step(*s_args, **s_kwargs):
                 t0 = time.perf_counter()
@@ -201,7 +192,7 @@ class TestDefaultAdvancedPygameProduction(unittest.TestCase):
         print(f"Final Energy             : {engine1.energy:.6e}")
         print(f"Mean Adv Block Interval  : {mean_interval:.2f}")
         print(f"Max Adv Block Interval   : {max_interval}")
-        print(f"Active Fraction @ Frame10: {active_frac:.4f}")
+        print(f"Min-Interval Fraction @ Frame10: {active_frac:.4f}")
         print("-------------------------------------------------------\n")
 
         pos_run1 = engine1.pos.copy()

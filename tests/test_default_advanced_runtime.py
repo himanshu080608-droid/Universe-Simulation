@@ -9,7 +9,6 @@ import sys
 import os
 import unittest
 import numpy as np
-import inspect
 
 os.environ["SDL_VIDEODRIVER"] = "dummy"
 
@@ -34,21 +33,9 @@ class HeadlessTestRenderer(RealPygameRenderer):
         return super()._handle_events(pos)
 
     def render_frame(self, *args, **kwargs):
-        global render_frame_calls, captured_engine
+        global render_frame_calls
         render_frame_calls += 1
         self.frames += 1
-        
-        if captured_engine is None:
-            # Safely capture the engine from run_pygame locals
-            frame = inspect.currentframe()
-            while frame:
-                if 'engine' in frame.f_locals:
-                    obj = frame.f_locals['engine']
-                    if hasattr(obj, 'step_count'):
-                        captured_engine = obj
-                        break
-                frame = frame.f_back
-                
         return super().render_frame(*args, **kwargs)
 
 
@@ -76,12 +63,24 @@ class TestDefaultAdvancedRuntime(unittest.TestCase):
             "--width", "320",
             "--height", "240"
         ]
+        original_run_pygame = main.run_pygame
+        
+        def run_pygame_wrapper(engine, args):
+            global captured_engine
+            captured_engine = engine
+            try:
+                original_run_pygame(engine, args)
+            finally:
+                pass
+                
+        main.run_pygame = run_pygame_wrapper
         
         try:
             main.main()
         except SystemExit as e:
             self.assertEqual(e.code, 0, f"SystemExit with nonzero code: {e.code}")
         finally:
+            main.run_pygame = original_run_pygame
             sys.argv = old_argv
 
     def test_default_advanced_runtime(self):

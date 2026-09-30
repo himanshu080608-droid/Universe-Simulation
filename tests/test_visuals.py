@@ -424,32 +424,32 @@ class TestPygameRendererVisuals(unittest.TestCase):
             # Disable physics advancement
             engine.step = lambda *a, **k: None
             
-            # Patch renderer
             original_init = PygameRenderer.__init__
-            def patched_init(self, *r_args, **r_kwargs):
-                original_init(self, *r_args, **r_kwargs)
-                self._draw_hud = lambda *a, **k: None # disable HUD
-            PygameRenderer.__init__ = patched_init
-            
             original_handle_events = PygameRenderer._handle_events
-            frames = 0
-            def patched_handle_events(self, pos):
-                nonlocal frames
-                if frames >= 1:
-                    return False
-                frames += 1
-                return original_handle_events(self, pos)
-            PygameRenderer._handle_events = patched_handle_events
-            
             original_render_frame = PygameRenderer.render_frame
-            def patched_render_frame(self, *r_args, **r_kwargs):
-                ret = original_render_frame(self, *r_args, **r_kwargs)
-                nonlocal captured_surface
-                captured_surface = pygame.surfarray.array3d(self.screen)
-                return ret
-            PygameRenderer.render_frame = patched_render_frame
             
             try:
+                def patched_init(self, *r_args, **r_kwargs):
+                    original_init(self, *r_args, **r_kwargs)
+                    self._draw_hud = lambda *a, **k: None # disable HUD
+                PygameRenderer.__init__ = patched_init
+                
+                frames = 0
+                def patched_handle_events(self, pos):
+                    nonlocal frames
+                    if frames >= 1:
+                        return False
+                    frames += 1
+                    return original_handle_events(self, pos)
+                PygameRenderer._handle_events = patched_handle_events
+                
+                def patched_render_frame(self, *r_args, **r_kwargs):
+                    ret = original_render_frame(self, *r_args, **r_kwargs)
+                    nonlocal captured_surface
+                    captured_surface = pygame.surfarray.array3d(self.screen)
+                    return ret
+                PygameRenderer.render_frame = patched_render_frame
+                
                 original_run_pygame(engine, args)
             finally:
                 PygameRenderer.__init__ = original_init
@@ -471,11 +471,9 @@ class TestPygameRendererVisuals(unittest.TestCase):
             arr = np.transpose(captured_surface, (1, 0, 2))
             
             if not os.path.exists(baseline_path):
-                Image.fromarray(arr.astype(np.uint8)).save(baseline_path)
-                print(f"Generated new baseline: {baseline_path}")
-                baseline_img = arr
-            else:
-                baseline_img = np.array(Image.open(baseline_path).convert("RGB"))
+                self.fail(f"Required visual baseline is missing: {baseline_path}")
+            
+            baseline_img = np.array(Image.open(baseline_path).convert("RGB"))
                 
             self.assertEqual(arr.shape[:2], (800, 800), "Surface is not 800x800")
             self.assertEqual(arr.shape, baseline_img.shape, "Dimension mismatch")

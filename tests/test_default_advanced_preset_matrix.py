@@ -10,7 +10,6 @@ import os
 import time
 import unittest
 import numpy as np
-import inspect
 
 os.environ["SDL_VIDEODRIVER"] = "dummy"
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -51,16 +50,6 @@ class HeadlessTestRenderer(RealPygameRenderer):
         self.frames += 1
         render_frame_calls += 1
         
-        if captured_engine is None:
-            frame = inspect.currentframe()
-            while frame:
-                if 'engine' in frame.f_locals:
-                    obj = frame.f_locals['engine']
-                    if hasattr(obj, 'step_count'):
-                        captured_engine = obj
-                        break
-                frame = frame.f_back
-                
         if hasattr(self, 'trail_buffer'):
             captured_trail_buffers.append(self.trail_buffer.copy())
             
@@ -109,6 +98,9 @@ class TestPresetMatrix(unittest.TestCase):
         original_run_pygame = main.run_pygame
         
         def run_pygame_wrapper(engine, args):
+            global captured_engine
+            captured_engine = engine
+            
             original_step = engine.step
             def timed_step(*s_args, **s_kwargs):
                 t0 = time.perf_counter()
