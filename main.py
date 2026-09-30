@@ -66,6 +66,7 @@ import argparse
 import sys
 import os
 import numpy as np
+from universe.registry import PresetRegistry
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Argument parsing
@@ -76,11 +77,7 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )
-    p.add_argument("--preset", choices=["twin_galaxies", "solar_system", "chaos", "laplace",
-                                         "alpha_centauri", "milkomeda", "stephans_quintet", "messier13", "messier31",
-                                         "ngc1052_df2", "castor_sextuple", "hd98800_polar",
-                                         "trappist_1", "gravothermal_catastrophe", "wr104_pinwheel", "omega_centauri",
-                                         "pleiades_m45", "hirayama_family", "dark_matter_halo_merger", "great_attractor"],
+    p.add_argument("--preset", choices=PresetRegistry.list_presets(),
                    default="twin_galaxies",
                    help="Initial condition preset layout (default: twin_galaxies)")
     p.add_argument("--N", type=int, default=5000,
@@ -127,10 +124,14 @@ def parse_args():
 def run_pygame(engine, args):
     from renderer.pygame_renderer import PygameRenderer
 
+    preset_def = PresetRegistry.get(args.preset)
+    semantics = preset_def.get_render_semantics()
+
     renderer = PygameRenderer(
         width=args.width, height=args.height,
         trail_decay=args.trail_decay,
-        preset_name=args.preset
+        preset_name=args.preset,
+        render_semantics=semantics
     )
     spf = args.spf
 
@@ -138,8 +139,9 @@ def run_pygame(engine, args):
     # the 80th-percentile radius from the centroid) so the view starts
     # comfortably zoomed in — not a tiny dot, not an overwhelming wall of stars.
     # Comets (type 2) are ignored because their outer halo would zoom the camera
-    # all the way out, making the dense disk look like a clump of billiard balls.
-    _mask = engine.types != 2          # exclude comets
+    # Exclude designated types from auto-fit (e.g. comets, dark matter)
+    exclude_mask = np.isin(engine.types, semantics.get('auto_fit_exclude_types', []))
+    _mask = ~exclude_mask
     _fit_pos = engine.pos[_mask] if np.any(_mask) else engine.pos
     if len(_fit_pos) > 0:
         _cx = np.median(_fit_pos[:, 0])

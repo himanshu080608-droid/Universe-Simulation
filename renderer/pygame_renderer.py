@@ -197,13 +197,13 @@ class ParticleTrailBuffer:
 from numba import njit
 
 @njit(parallel=False, fastmath=True)
-def _fast_draw_heads(buffer, bloom_buffer, fx, fy, types, mass, zoom, w, h, colors, max_r_lut, min_r_lut, bloom_int_lut, bloom_spr_lut, mass_scale_lut, show_dm):
+def _fast_draw_heads(buffer, bloom_buffer, fx, fy, types, mass, zoom, w, h, colors, max_r_lut, min_r_lut, bloom_int_lut, bloom_spr_lut, mass_scale_lut, invisible_mask):
     N = len(fx)
     # --- PASS 1: Draw everything EXCEPT Black Holes ---
     for i in range(N):
         t = types[i]
         
-        if t == 14: # DARK_MATTER (always perfectly invisible, only felt via gravity)
+        if invisible_mask[t]:
             continue
             
         if t == 5:
@@ -283,7 +283,7 @@ def _fast_draw_heads(buffer, bloom_buffer, fx, fy, types, mass, zoom, w, h, colo
     
     for i in range(N):
         t = types[i]
-        if t != 5:
+        if t != 5 or invisible_mask[t]:
             continue
             
         x_f = fx[i]
@@ -341,14 +341,14 @@ def _fast_draw_heads(buffer, bloom_buffer, fx, fy, types, mass, zoom, w, h, colo
 
 
 @njit(parallel=True, fastmath=True)
-def _fast_splat(buffer, fx, fy, prev_fx, prev_fy, types, colors, w, h, intensity, draw_lines):
+def _fast_splat(buffer, fx, fy, prev_fx, prev_fy, types, colors, w, h, intensity, draw_lines, invisible_mask):
     """
     1-pixel thick, gap-free, native DDA line splatting for trails.
     Draws perfectly thin and sharp trails.
     """
     N = len(fx)
     for i in prange(N):
-        if types[i] == 14: # DARK_MATTER
+        if invisible_mask[types[i]]:
             continue
             
         x1_f = fx[i]
@@ -527,7 +527,7 @@ class PygameRenderer:
     """
     def __init__(self, width=1600, height=900,
                  trail_decay=0.90,
-                 title="Laplace's Demon — Universe Sandbox", preset_name=None):
+                 title="Laplace's Demon — Universe Sandbox", preset_name=None, render_semantics=None):
         pygame.init()
         pygame.display.set_caption(title)
         self.w = width
@@ -541,6 +541,12 @@ class PygameRenderer:
         self.camera  = Camera(width, height)
         self.trail_buffer = np.zeros((width, height, 3), dtype=np.float32)
         self.bloom_levels = 5
+        
+        self.render_semantics = render_semantics or {'invisible_types': [14], 'auto_fit_exclude_types': [2, 14]}
+        self.invisible_mask = np.zeros(256, dtype=np.bool_)
+        for t in self.render_semantics.get('invisible_types', []):
+            if 0 <= t < 256:
+                self.invisible_mask[t] = True
 
         # Determine initial trail preset index based on requested decay
         self.trail_index = 4 # Default to standard
@@ -769,7 +775,7 @@ class PygameRenderer:
         draw_lines = bool(self.decay > 0.0)
 
         # ── Pass 1: 1-Pixel Thick DDA Line Splatting ─────
-        _fast_splat(self.trail_buffer, fx, fy, fx_prev, fy_prev, types, colors, self.w, self.h, splat_intensity, draw_lines)
+        _fast_splat(self.trail_buffer, fx, fy, fx_prev, fy_prev, types, colors, self.w, self.h, splat_intensity, draw_lines, self.invisible_mask)
 
         # ── Pass 2: Fast Numba Additive Heads ────────────────────────
         # Copy trail buffer to avoid leaving permanent blobs
@@ -778,7 +784,7 @@ class PygameRenderer:
         
         # Optionally pass a dummy array for mass if None to satisfy numba typing
         mass_array = mass if mass is not None else np.zeros(0, dtype=np.float64)
-        _fast_draw_heads(display_buffer, bloom_buffer, fx, fy, types, mass_array, zoom, self.w, self.h, colors, self.max_r, self.min_r, self.bloom_int, self.bloom_spr, self.mass_scale, self.show_dark_matter)
+        _fast_draw_heads(display_buffer, bloom_buffer, fx, fy, types, mass_array, zoom, self.w, self.h, colors, self.max_r, self.min_r, self.bloom_int, self.bloom_spr, self.mass_scale, self.invisible_mask)
 
         # Draw Spectator Target Reticle
         if self.tracked_particle is not None and 0 <= self.tracked_particle < len(types):
